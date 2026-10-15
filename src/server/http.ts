@@ -280,7 +280,8 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
 
     if (route === '/api/scan' && req.method === 'POST') {
       try {
-        const result = await refreshFavorites(enqueueCtx());
+        const scanPayload = await body(req);
+        const result = await refreshFavorites(enqueueCtx(), { full: scanPayload.full === true });
         bus.emit({ t: 'queue.stats', stats: {} as never });
         json(res, { ok: true, ...result });
       } catch (err) {

@@ -3,7 +3,9 @@ import { loadConfig } from '../../config.js';
 import { scan } from '../../core/scanner.js';
 import { log } from '../../utils/logger.js';
 
-export async function scanCommand(options: { fav?: string; includeCollected?: boolean; cookieFile?: string }): Promise<void> {
+export async function scanCommand(
+  options: { fav?: string; includeCollected?: boolean; cookieFile?: string; full?: boolean } = {},
+): Promise<void> {
   await loadConfig();
   const cookieFile = options.cookieFile ?? DEFAULT_COOKIE_FILE;
   const store = await loadCookieFile(cookieFile);
@@ -20,8 +22,13 @@ export async function scanCommand(options: { fav?: string; includeCollected?: bo
         .filter((n) => Number.isFinite(n))
     : undefined;
 
-  const result = await scan(store.cookies, { folders: folderIds, includeCollected: options.includeCollected });
+  const result = await scan(store.cookies, {
+    folders: folderIds,
+    includeCollected: options.includeCollected,
+    full: options.full,
+  });
   log.print('');
+  log.print(`扫描方式：${result.incremental ? `增量（新增 ${result.added}）` : '全量'}`);
   log.print(`收藏夹数：${result.index.folders.length}`);
   log.print(`视频总数：${result.index.videos.length}`);
   log.print(`多 P 稿件：${result.index.videos.filter((v) => (v.pages?.length ?? 0) > 1).length}（分 P 列表在下载规划时展开）`);

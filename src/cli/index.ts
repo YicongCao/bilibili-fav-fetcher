@@ -55,6 +55,7 @@ program
   .description('扫描收藏夹结构并导出 metadata')
   .option('--fav <ids>', '只扫描指定收藏夹 id（逗号分隔）')
   .option('--include-collected', '同时扫描收藏的他人收藏夹')
+  .option('--full', '忽略已有 index.json，整量重扫（默认增量）')
   .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {

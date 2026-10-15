@@ -82,10 +82,18 @@ export async function enqueueUp(
 }
 
 /** 重新扫描收藏夹（刷新 index.json） */
-export async function refreshFavorites(ctx: EnqueueCtx): Promise<{ videos: number; dirs: number }> {
-  const result = await scan(ctx.cookies);
+export async function refreshFavorites(
+  ctx: EnqueueCtx,
+  opts: { full?: boolean } = {},
+): Promise<{ videos: number; dirs: number; incremental: boolean; added: number }> {
+  const result = await scan(ctx.cookies, { full: opts.full });
   invalidateUsage(ctx.root);
-  return { videos: result.index.videos.length, dirs: result.dirCount };
+  return {
+    videos: result.index.videos.length,
+    dirs: result.dirCount,
+    incremental: result.incremental,
+    added: result.added,
+  };
 }
 
 /** 收藏夹清单（供管理端下拉） */

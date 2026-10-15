@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { ensureDir, writeJsonAtomic } from '../utils/fsx.js';
+import { ensureDir, readJson, writeJsonAtomic } from '../utils/fsx.js';
 import { log } from '../utils/logger.js';
 import { getConfig, type Config } from '../config.js';
 import { isDefaultFolder, listCreatedFolders, listCollectedFolders, listFolderResources } from '../api/favorite.js';
@@ -10,12 +10,16 @@ import { nav } from '../api/nav.js';
 export interface ScanOptions {
   folders?: number[];
   includeCollected?: boolean;
+  /** true = 忽略已有 index.json，整量重扫 */
+  full?: boolean;
 }
 
 export interface ScanResult {
   index: IndexFile;
   root: string;
   dirCount: number;
+  incremental: boolean;
+  added: number;
 }
 
 /** 决策视频主目录：优先非默认收藏夹，取收藏时间最新的那个 */
@@ -41,6 +45,15 @@ export async function scan(cookies: Record<string, string>, opts: ScanOptions = 
   const config = getConfig();
   const root = config.output.root;
   const me = await nav(cookies);
+
+  // 增量扫描：以已有 index.json 为底，遇到已收录的稿件就停止翻页
+  const oldIndex = await readJson<IndexFile>(path.join(root, 'index.json'));
+  const incremental = !opts.full && (config.scan.incremental ?? true) && Boolean(oldIndex?.videos?.length);
+  const known = new Map<string, VideoMeta>();
+  if (incremental) {
+    for (const v of oldIndex!.videos) known.set(v.bvid, v);
+    log.info(`增量扫描：已有 ${known.size} 个稿件，只拉取新增部分（--full 可强制全量）`);
+  }
 
   let folders: FolderInfo[] = await listCreatedFolders(cookies, me.mid);
   if (opts.includeCollected ?? config.scan.includeCollectedFolders) {
@@ -77,7 +90,10 @@ export async function scan(cookies: Record<string, string>, opts: ScanOptions = 
 
     let medias;
     try {
-      medias = await listFolderResources(cookies, folder.fid, { order: config.scan.resourceOrder });
+      medias = await listFolderResources(cookies, folder.fid, {
+        order: config.scan.resourceOrder,
+        ...(incremental ? { stopWhen: (m: { bvid?: string; bv_id?: string }) => known.has(m.bvid ?? m.bv_id ?? '') } : {}),
+      });
     } catch (err) {
       log.error(`收藏夹「${folder.title}」拉取失败：${(err as Error).message}`);
       continue;
@@ -96,6 +112,17 @@ export async function scan(cookies: Record<string, string>, opts: ScanOptions = 
       if (!bvid) continue;
 
       const favTime = (m.fav_time ?? 0) * 1000 || Date.now();
+      // 已收录的稿件复用旧记录（保留 local/pages/downloadedAt 等），只更新收藏归属与时间
+      const base = known.get(bvid);
+      if (base && !videosByBvid.has(bvid)) {
+        base.title = m.title ?? base.title;
+        base.cover = m.cover ?? base.cover;
+        base.duration = m.duration ?? base.duration;
+        base.pubDate = (m.pubtime ?? 0) * 1000 || base.pubDate;
+        base.collectedPage = m.page ?? base.collectedPage;
+        base.up = { mid: m.upper?.mid ?? base.up.mid, name: m.upper?.name ?? base.up.name };
+        videosByBvid.set(bvid, base);
+      }
       const meta: VideoMeta = videosByBvid.get(bvid) ?? {
         bvid,
         aid: m.id ?? 0,
@@ -130,6 +157,18 @@ export async function scan(cookies: Record<string, string>, opts: ScanOptions = 
   }));
 
   const videos = [...videosByBvid.values()];
+  const added = incremental ? videos.filter((v) => !known.has(v.bvid)).length : videos.length;
+  // 增量模式下，已下载但被取消收藏的稿件保留在库里（不丢失本地成品信息）
+  if (incremental) {
+    for (const old of oldIndex!.videos) {
+      if (videosByBvid.has(old.bvid)) continue;
+      const st = old.local?.status;
+      if (st === 'done' || st === 'skipped') {
+        videos.push(old);
+        log.debug(`已下载但已取消收藏，仍保留在库：${old.bvid}`);
+      }
+    }
+  }
   for (const v of videos) {
     const primary = pickPrimaryFolder(v, stats, config.download.folderPick);
     if (!primary) continue;
@@ -173,6 +212,8 @@ export async function scan(cookies: Record<string, string>, opts: ScanOptions = 
     }
   }
 
-  log.info(`扫描完成：${videos.length} 个视频，${dirs.size} 个目录（已跳过 非视频 ${skippedNonVideo} / 失效 ${skippedDead}）`);
-  return { index, root, dirCount: dirs.size };
+  log.info(
+    `扫描完成：${videos.length} 个视频，${dirs.size} 个目录（${incremental ? `增量，新增 ${added}` : '全量'}；已跳过 非视频 ${skippedNonVideo} / 失效 ${skippedDead}）`,
+  );
+  return { index, root, dirCount: dirs.size, incremental, added };
 }

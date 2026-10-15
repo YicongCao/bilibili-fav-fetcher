@@ -30,7 +30,12 @@ export interface Config {
     /** 任务封装成功后立即删除它的中间分片 */
     cleanCacheOnDone: boolean;
   };
-  scan: { includeCollectedFolders: boolean; resourceOrder: 'mtime' | 'view' };
+  scan: {
+    includeCollectedFolders: boolean;
+    resourceOrder: 'mtime' | 'view';
+    /** 增量扫描：遇到已收录的稿件就停止翻页 */
+    incremental: boolean;
+  };
   download: {
     orderBy: 'favTime' | 'pubDate';
     maxParallelTasks: number;
@@ -113,7 +118,7 @@ export const DEFAULT_CONFIG: Config = {
     upDirTemplate: 'up/{up}({mid})',
     cleanCacheOnDone: true,
   },
-  scan: { includeCollectedFolders: false, resourceOrder: 'mtime' },
+  scan: { includeCollectedFolders: false, resourceOrder: 'mtime', incremental: true },
   download: {
     orderBy: 'favTime',
     maxParallelTasks: 3,

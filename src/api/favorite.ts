@@ -1,6 +1,7 @@
 import { apiGet } from './client.js';
 import type { FolderInfo } from '../types/index.js';
 import { globalLimiter } from '../utils/rate.js';
+import { log } from '../utils/logger.js';
 
 export interface RawMedia {
   id: number;
@@ -92,7 +93,13 @@ export async function listCollectedFolders(cookies: Record<string, string>, mid:
 export async function listFolderResources(
   cookies: Record<string, string>,
   fid: number,
-  opts: { order?: 'mtime' | 'view'; pageSize?: number; maxPages?: number } = {},
+  opts: {
+    order?: 'mtime' | 'view';
+    pageSize?: number;
+    maxPages?: number;
+    /** 增量扫描：遇到已收录的 bvid 就停止翻页（列表按 mtime 倒序，新增的都在前面） */
+    stopWhen?: (m: RawMedia) => boolean;
+  } = {},
 ): Promise<RawMedia[]> {
   const order = opts.order ?? 'mtime';
   const pageSize = opts.pageSize ?? 20;
@@ -117,6 +124,11 @@ export async function listFolderResources(
     const list = data.medias ?? [];
     out.push(...list);
     if (!data.has_more || list.length < pageSize) break;
+    // 增量：这一页已经全都是旧内容（多为列表前部），可以提前收工
+    if (opts.stopWhen && list.every((m) => opts.stopWhen!(m))) {
+      log.info(`增量扫描：收藏夹已翻到已收录部分，提前停止（第 ${pn} 页）`);
+      break;
+    }
   }
   return out;
 }

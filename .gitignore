@@ -9,3 +9,4 @@ bin/
 *.muxing
 *.m4s
 .DS_Store
+.tmp/

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { readJson, writeJsonAtomic, writeTextAtomic } from '../utils/fsx.js';
+import { deletedKey, loadDeleted } from '../core/deleted.js';
 import { log } from '../utils/logger.js';
 import type { IndexFile } from '../types/index.js';
 
@@ -27,6 +28,9 @@ export interface LibraryItem {
   qualityLabel?: string;
   hdr?: boolean;
   downloadedAt?: number;
+  /** 已被手动删除（视频文件已删、metadata 保留，下载器不再重复下载） */
+  deleted?: boolean;
+  deletedAt?: number;
 }
 
 export interface LibraryData {
@@ -40,6 +44,7 @@ export interface LibraryData {
 /** 由 index.json（优先读每个视频的同名 .meta.json）生成媒体库数据 */
 export async function scanLibrary(root: string): Promise<LibraryData> {
   const index = await readJson<IndexFile>(path.join(root, 'index.json'));
+  const deleted = await loadDeleted(root);
   const items: LibraryItem[] = [];
   const folders = new Set<string>();
   const ups = new Map<number, { mid: number; name: string; count: number }>();
@@ -60,6 +65,7 @@ export async function scanLibrary(root: string): Promise<LibraryData> {
     for (const part of parts) {
       const fileAbs = path.join(root, part.file);
       const size = await stat(fileAbs).then((s) => s.size).catch(() => undefined);
+      const del = deleted.items[deletedKey(video.bvid, part.page ?? 1)];
       const folder = local.dir ?? video.primaryFolder?.title ?? '';
       folders.add(folder);
 
@@ -92,6 +98,8 @@ export async function scanLibrary(root: string): Promise<LibraryData> {
         qualityLabel: local.qualityLabel,
         hdr: local.hdr,
         downloadedAt: local.downloadedAt,
+        deleted: Boolean(del),
+        deletedAt: del?.at,
       });
     }
   }

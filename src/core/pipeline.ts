@@ -10,6 +10,7 @@ import { finalizeTask } from './finalize.js';
 import { Watchdog } from './watchdog.js';
 import { outputUsage, isOverLimit, isNearLimit, invalidateUsage, type DiskUsage } from './disk.js';
 import { cleanTaskCache } from './cache.js';
+import { isDeleted } from './deleted.js';
 import { waitMuxGate } from './muxGate.js';
 import { createEngine, decideEngine, type EngineName } from './engines/index.js';
 import type { TaskRecord } from '../types/index.js';
@@ -39,6 +40,16 @@ async function processTask(task: TaskRecord, ctx: PipelineContext, hooks: Pipeli
   const config = getConfig();
   const root = config.output.root;
   const dest = destPath(task, root);
+
+  // 用户在媒体库里删过的分 P：不再下载（metadata 保留，删标记在 .state/deleted.json）
+  if (await isDeleted(root, task.bvid, task.page)) {
+    task.stage = 'skipped';
+    ctx.store.upsert(task);
+    ctx.queue.complete(task.id, 'skipped');
+    if (config.output.cleanCacheOnDone) await cleanTaskCache(root, task.id);
+    hooks.onTaskUpdate?.(task);
+    return;
+  }
 
   if (config.download.skipExisting && existsSync(dest)) {
     task.stage = 'skipped';

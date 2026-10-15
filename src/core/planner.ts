@@ -5,6 +5,7 @@ import { viewDetail, type ViewDetail } from '../api/view.js';
 import { log } from '../utils/logger.js';
 import { getConfig } from '../config.js';
 import { buildBaseName, usePartSuffix } from './namer.js';
+import { deletedKey, loadDeleted } from './deleted.js';
 import type { TaskRecord, VideoMeta } from '../types/index.js';
 
 export function taskId(bvid: string, cid: number, quality: string, container: string): string {
@@ -46,6 +47,8 @@ export async function buildTasks(
   const root = config.output.root;
   const orderBy = opts.orderBy ?? config.download.orderBy;
   const pageRule = opts.pages ?? config.download.pages;
+  // 用户手动删除过的分 P 不再规划，避免「删了又下回来」
+  const deleted = await loadDeleted(root);
 
   const sorted = [...videos].sort((a, b) => {
     const ka = orderBy === 'pubDate' ? a.pubDate : Math.max(...a.folders.map((f) => f.favTime), 0);
@@ -90,6 +93,7 @@ export async function buildTasks(
 
     for (const p of targets) {
       if (opts.limit && tasks.length >= opts.limit) break;
+      if (deleted.items[deletedKey(video.bvid, p.page)]) continue;
       // 单 P 稿件去掉 [P{p}] 片段，避免出现空的 [P]
       const template = multi
         ? config.output.filenameTemplate

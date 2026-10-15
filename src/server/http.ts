@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { renderControlPage } from '../web/controlPage.js';
 import { renderLibraryPage } from '../web/libraryPage.js';
@@ -13,7 +13,8 @@ import { expiresInDays } from '../auth/cookie.js';
 import { outputUsage, invalidateUsage } from '../core/disk.js';
 import { cleanAllCache, cleanDoneCache } from '../core/cache.js';
 import { enqueueFavorites, enqueueUp, listFolders, refreshFavorites, type EnqueueCtx } from '../core/enqueue.js';
-import { buildLibrary } from '../library/scanLibrary.js';
+import { buildLibrary, scanLibrary } from '../library/scanLibrary.js';
+import { markDeleted, restoreDeleted, type DeletedEntry } from '../core/deleted.js';
 import { isMuxPaused, setMuxPaused } from '../core/muxGate.js';
 import type { TaskStore } from '../core/taskStore.js';
 import type { DownloadQueue } from '../core/queue.js';
@@ -249,6 +250,52 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
       invalidateUsage(ctx.root);
       log.warn(`已清理分片缓存，释放 ${formatBytes(result.bytes)}（${result.removed} 个目录）`);
       json(res, { ok: true, ...result });
+      return;
+    }
+
+    if (route === '/api/library/delete' && req.method === 'POST') {
+      const payload = await body(req);
+      const ids: string[] = Array.isArray(payload.ids) ? payload.ids.map(String) : [];
+      if (!ids.length) {
+        json(res, { ok: false, error: '未指定要删除的视频' }, 400);
+        return;
+      }
+      const data = await scanLibrary(ctx.root);
+      const entries: DeletedEntry[] = [];
+      let bytes = 0;
+      for (const id of ids) {
+        const item = data.items.find((i) => `${i.bvid}:${i.page}` === id);
+        if (!item) continue;
+        // 只删视频与其字幕；封面与同名 .meta.json 保留，便于日后找回
+        const files = [item.video, ...(item.subtitles ?? []).map((s) => s.file)].filter(Boolean);
+        let freed = 0;
+        for (const f of files) {
+          const abs = path.join(ctx.root, f);
+          const size = await stat(abs).then((s) => s.size).catch(() => 0);
+          if (!size) continue;
+          await rm(abs, { force: true }).catch(() => undefined);
+          freed += size;
+        }
+        bytes += freed;
+        entries.push({ bvid: item.bvid, page: item.page, title: item.title, at: Date.now(), bytes: freed });
+      }
+      if (!entries.length) {
+        json(res, { ok: false, error: '没有匹配到可删除的视频' }, 400);
+        return;
+      }
+      await markDeleted(ctx.root, entries);
+      await buildLibrary(ctx.root);
+      log.warn(`媒体库删除 ${entries.length} 个视频，释放 ${formatBytes(bytes)}（metadata 保留）`);
+      json(res, { ok: true, removed: entries.length, bytes });
+      return;
+    }
+
+    if (route === '/api/library/restore' && req.method === 'POST') {
+      const payload = await body(req);
+      const ids: string[] = Array.isArray(payload.ids) ? payload.ids.map(String) : [];
+      const n = await restoreDeleted(ctx.root, ids);
+      await buildLibrary(ctx.root);
+      json(res, { ok: true, restored: n });
       return;
     }
 

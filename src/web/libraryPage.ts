@@ -51,6 +51,7 @@ export function renderLibraryPage(): string {
   button:active { transform:scale(.96); }
   button:hover { background:var(--surface-3); }
   button.filled { background:var(--blue); color:#fff; }
+  button.tiny { padding:4px 10px; font-size:12px; }
   button.filled:hover { background:#3d9bff; }
   /* ---------- 网格卡片 ---------- */
   main { padding:18px 22px 32px; display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
@@ -72,6 +73,46 @@ export function renderLibraryPage(): string {
   .title { font-size:13px; line-height:1.4; height:2.8em; overflow:hidden; }
   .sub { color:var(--label-3); font-size:12px; margin-top:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .empty { color:var(--label-2); padding:60px 0; text-align:center; grid-column:1/-1; }
+  /* ---------- 列表视图 ---------- */
+  main.list { grid-template-columns:1fr; gap:10px; }
+  .row {
+    display:grid; grid-template-columns:112px minmax(0,1fr) 130px 90px 104px auto; gap:14px; align-items:center;
+    background:var(--surface); border:1px solid var(--sep); border-radius:var(--r-md); padding:8px 12px 8px 8px;
+    backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%);
+    cursor:pointer; transition:transform .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
+  }
+  .row:hover { transform:translateY(-1px); border-color:rgba(10,132,255,.45); background:rgba(44,44,46,.6); }
+  .row .rt { width:112px; aspect-ratio:16/9; border-radius:var(--r-sm); background:#0b0b0d center/cover no-repeat; position:relative; }
+  .row .rt .dur { position:absolute; right:5px; bottom:4px; background:rgba(0,0,0,.66); border-radius:999px; padding:1px 6px; font-size:10px; font-variant-numeric:tabular-nums; }
+  .row .r-title { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .r-sub { color:var(--label-3); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .r-cell { font-size:12px; color:var(--label-2); font-variant-numeric:tabular-nums; }
+  .row .r-acts { display:flex; gap:6px; }
+  .row .r-acts button { padding:4px 10px; font-size:12px; background:var(--surface-2); }
+  .card.deleted, .row.deleted { opacity:.55; }
+  .tag-del { background:rgba(255,69,58,.2); color:#ff8b84; border-radius:999px; font-size:11px; padding:2px 8px; }
+  /* ---------- 分段控件 ---------- */
+  .seg { display:flex; background:var(--surface-2); border-radius:11px; padding:2px; gap:2px; }
+  .seg button { flex:1; background:transparent; border:0; border-radius:9px; padding:6px 12px; font-size:13px; color:var(--label-2); }
+  .seg button.active { background:var(--surface-3); color:var(--label); box-shadow:0 1px 3px rgba(0,0,0,.3); }
+  #toast {
+    position:fixed; left:50%; bottom:28px; transform:translate(-50%,20px);
+    background:rgba(44,44,46,.92); color:var(--label); border:1px solid var(--sep);
+    padding:11px 18px; border-radius:999px; font-size:13px; z-index:99; opacity:0; pointer-events:none;
+    backdrop-filter:blur(20px); box-shadow:0 10px 30px rgba(0,0,0,.4);
+    transition:opacity .22s var(--ease), transform .22s var(--ease);
+  }
+  #toast.show { opacity:1; transform:translate(-50%,0); }
+  #sheet { border:0; padding:0; background:transparent; max-width:400px; width:92vw; }
+  #sheet::backdrop { background:rgba(0,0,0,.55); }
+  .alert { background:rgba(44,44,46,.92); backdrop-filter:blur(24px); border-radius:var(--r-lg); border:1px solid var(--sep); overflow:hidden; text-align:center; animation:pop .22s var(--ease); }
+  @keyframes pop { from { transform:scale(.94); opacity:0; } to { transform:scale(1); opacity:1; } }
+  .alert .body { padding:20px 20px 14px; }
+  .alert .title { font-size:15px; font-weight:600; }
+  .alert .msg { font-size:13px; color:var(--label-2); margin-top:6px; line-height:1.45; }
+  .alert .acts { display:flex; border-top:1px solid var(--sep); }
+  .alert .acts button { flex:1; border-radius:0; background:transparent; border:0; padding:12px; font-size:15px; color:#8fc6ff; }
+  .alert .acts button + button { border-left:1px solid var(--sep); color:var(--label); font-weight:600; }
   /* ---------- 底部抽屉播放器（iOS sheet） ---------- */
   dialog { border:0; padding:0; background:transparent; width:min(1000px,94vw); max-width:none; }
   dialog::backdrop { background:rgba(0,0,0,.6); backdrop-filter:blur(3px); }
@@ -107,10 +148,22 @@ export function renderLibraryPage(): string {
     <option value="favTime">按收藏时间</option>
     <option value="pubDate">按发布时间</option>
     <option value="title">按标题</option>
-    <option value="size">按体积</option>
+    <option value="size">按体积（大→小）</option>
+    <option value="duration">按时长（长→短）</option>
   </select>
+  <div class="seg" style="width:150px">
+    <button id="view-grid" class="active">网格</button>
+    <button id="view-list">列表</button>
+  </div>
+  <button id="toggle-deleted">显示已删除</button>
 </header>
 <main id="grid"></main>
+
+<div id="toast"></div>
+<dialog id="sheet"><div class="alert">
+  <div class="body"><div class="title" id="sheet-title"></div><div class="msg" id="sheet-msg"></div></div>
+  <div class="acts"><button id="sheet-cancel">取消</button><button id="sheet-ok">删除</button></div>
+</div></dialog>
 
 <dialog id="dlg"><div class="sheet">
   <div class="grabber"></div>
@@ -130,18 +183,82 @@ export function renderLibraryPage(): string {
 
 <script src="library.js"></script>
 <script>
-const DATA = window.__BILI_LIBRARY__ || { items: [], folders: [], ups: [] };
+let DATA = window.__BILI_LIBRARY__ || { items: [], folders: [], ups: [] };
 const grid = document.getElementById('grid');
 const dlg = document.getElementById('dlg');
 const video = document.getElementById('video');
 let current = null;
 
 const fmtDur = (s) => { const m = Math.floor(s/60), ss = Math.floor(s%60); const h = Math.floor(m/60); return h ? h+':'+String(m%60).padStart(2,'0')+':'+String(ss).padStart(2,'0') : m+':'+String(ss).padStart(2,'0'); };
-const fmtSize = (n) => n ? (n/1024/1024/1024).toFixed(2)+' GB' : '-';
+const fmtSize = (n) => !n ? '-' : n >= 1073741824 ? (n/1073741824).toFixed(2)+' GB' : (n/1048576).toFixed(0)+' MB';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const idOf = (it) => it.bvid + ':' + it.page;
+const canManage = location.protocol !== 'file:';   // 删除/恢复需要后端，file:// 下隐藏入口
+
+let view = localStorage.getItem('bili-lib-view') || 'grid';
+let showDeleted = false;
+
+let toastTimer = null;
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+function confirmSheet(title, msg, okText) {
+  return new Promise((resolve) => {
+    const dlg = document.getElementById('sheet');
+    document.getElementById('sheet-title').textContent = title;
+    document.getElementById('sheet-msg').textContent = msg;
+    document.getElementById('sheet-ok').textContent = okText || '确定';
+    const ok = document.getElementById('sheet-ok'), cancel = document.getElementById('sheet-cancel');
+    const done = (v) => { dlg.close(); ok.onclick = cancel.onclick = null; resolve(v); };
+    ok.onclick = () => done(true); cancel.onclick = () => done(false);
+    dlg.showModal();
+  });
+}
 
 for (const f of DATA.folders) { const o = document.createElement('option'); o.value = f; o.textContent = f; document.getElementById('folder').appendChild(o); }
 for (const u of DATA.ups) { const o = document.createElement('option'); o.value = String(u.mid); o.textContent = u.name + '（' + u.count + '）'; document.getElementById('up').appendChild(o); }
+
+function setView(v) {
+  view = v;
+  localStorage.setItem('bili-lib-view', v);
+  grid.className = v === 'list' ? 'list' : '';
+  document.getElementById('view-grid').className = v === 'grid' ? 'active' : '';
+  document.getElementById('view-list').className = v === 'list' ? 'active' : '';
+  render();
+}
+
+/** 删除后重新拉取 library.json，避免整页刷新 */
+async function refreshData() {
+  try {
+    const res = await fetch('library.json?t=' + Date.now());
+    DATA = await res.json();
+  } catch {
+    location.reload();
+  }
+}
+
+async function removeItem(id) {
+  const it = DATA.items.find(x => idOf(x) === id);
+  if (!it) return;
+  const yes = await confirmSheet('删除这个视频？', esc(it.title) + '\\n将删除视频文件与字幕，保留封面与 metadata，并标记为已删除 —— 下载器以后不会再重复下载它。');
+  if (!yes) return;
+  const res = await (await fetch('/api/library/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [id] }),
+  })).json();
+  toast(res.ok ? '已删除，释放 ' + fmtSize(res.bytes) : ('删除失败：' + (res.error || '')));
+  await refreshData(); render();
+}
+
+async function restoreItem(id) {
+  const res = await (await fetch('/api/library/restore', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [id] }),
+  })).json();
+  toast(res.ok ? '已恢复，下次扫描可重新下载' : ('恢复失败：' + (res.error || '')));
+  await refreshData(); render();
+}
 
 function render() {
   const q = document.getElementById('q').value.trim().toLowerCase();
@@ -150,33 +267,71 @@ function render() {
   const sort = document.getElementById('sort').value;
 
   let list = DATA.items.filter(it => {
+    if (!showDeleted && it.deleted) return false;
     if (folder && it.folder !== folder) return false;
     if (up && String(it.up.mid) !== up) return false;
     if (q && !(it.title + ' ' + it.up.name + ' ' + it.bvid).toLowerCase().includes(q)) return false;
     return true;
   });
-  list.sort((a,b) => sort === 'title' ? a.title.localeCompare(b.title,'zh') : sort === 'size' ? (b.size||0)-(a.size||0) : (b[sort]||0)-(a[sort]||0));
+  list.sort((a,b) => {
+    if (sort === 'title') return a.title.localeCompare(b.title, 'zh');
+    // size / duration / favTime / pubDate 一律「从大到小、从新到旧」
+    return (b[sort] || 0) - (a[sort] || 0);
+  });
 
-  document.getElementById('count').textContent = list.length + ' 个视频';
+  const deletedCount = DATA.items.filter(it => it.deleted).length;
+  document.getElementById('count').textContent = list.length + ' 个视频' + (deletedCount ? '（已删除 ' + deletedCount + '）' : '');
   if (!list.length) { grid.innerHTML = '<div class="empty">没有匹配的视频</div>'; return; }
+
+  if (view === 'list') {
+    grid.innerHTML = list.map(it => \`
+      <div class="row \${it.deleted?'deleted':''}" data-id="\${it.bvid}" data-page="\${it.page}">
+        <div class="rt" style="background-image:url('\${encodeURI(it.poster || '')}')"><span class="dur">\${fmtDur(it.duration)}</span></div>
+        <div>
+          <div class="r-title" title="\${esc(it.title)}">\${esc(it.title)}\${it.page>1?' P'+it.page:''} \${it.deleted?'<span class="tag-del">已删除</span>':''}</div>
+          <div class="r-sub">\${esc(it.up.name)} · \${esc(it.folder||'')}</div>
+        </div>
+        <div class="r-cell">\${fmtSize(it.size)}</div>
+        <div class="r-cell">\${fmtDur(it.duration)}</div>
+        <div class="r-cell">\${it.qualityLabel ? '<span class="badge">'+esc(it.qualityLabel)+'</span>' : ''}\${it.hdr?'<span class="badge hdr">HDR</span>':''}</div>
+        <div class="r-acts">
+          \${canManage ? (it.deleted
+            ? '<button data-act="restore" data-key="'+idOf(it)+'">恢复</button>'
+            : '<button data-act="del" data-key="'+idOf(it)+'">删除</button>') : ''}
+        </div>
+      </div>\`).join('');
+    return;
+  }
+
   grid.innerHTML = list.map(it => \`
-    <div class="card" data-id="\${it.bvid}" data-page="\${it.page}">
+    <div class="card \${it.deleted?'deleted':''}" data-id="\${it.bvid}" data-page="\${it.page}">
       <div class="thumb" style="background-image:url('\${encodeURI(it.poster || '')}')">
         <div class="badges">
           \${it.qualityLabel ? '<span class="badge">'+esc(it.qualityLabel)+'</span>' : ''}
           \${it.hdr ? '<span class="badge hdr">HDR</span>' : ''}
+          \${it.deleted ? '<span class="badge" style="background:rgba(255,69,58,.9);color:#fff">已删除</span>' : ''}
         </div>
         <div class="dur">\${fmtDur(it.duration)}</div>
       </div>
       <div class="meta">
         <div class="title" title="\${esc(it.title)}">\${esc(it.title)}\${it.page>1?' P'+it.page:''}</div>
         <div class="sub">\${esc(it.up.name)} · \${esc(it.folder||'')} · \${fmtSize(it.size)}</div>
+        \${canManage ? '<div class="sub" style="margin-top:8px">' + (it.deleted
+          ? '<button class="tiny" data-act="restore" data-key="'+idOf(it)+'">恢复（可重新下载）</button>'
+          : '<button class="tiny" data-act="del" data-key="'+idOf(it)+'">删除</button>') + '</div>' : ''}
       </div>
     </div>\`).join('');
 }
 
 grid.addEventListener('click', (e) => {
-  const card = e.target.closest('.card'); if (!card) return;
+  const actBtn = e.target.closest('button[data-act]');
+  if (actBtn) {
+    e.stopPropagation();
+    const key = actBtn.dataset.key;
+    if (actBtn.dataset.act === 'del') removeItem(key); else restoreItem(key);
+    return;
+  }
+  const card = e.target.closest('.card, .row'); if (!card) return;
   const page = Number(card.dataset.page || 1);
   const group = DATA.items.filter(it => it.bvid === card.dataset.id).sort((a,b)=>a.page-b.page);
   if (!group.length) return;
@@ -214,6 +369,15 @@ document.getElementById('q').oninput = render;
 document.getElementById('folder').onchange = render;
 document.getElementById('up').onchange = render;
 document.getElementById('sort').onchange = render;
+document.getElementById('view-grid').onclick = () => setView('grid');
+document.getElementById('view-list').onclick = () => setView('list');
+document.getElementById('toggle-deleted').onclick = () => {
+  showDeleted = !showDeleted;
+  document.getElementById('toggle-deleted').textContent = showDeleted ? '隐藏已删除' : '显示已删除';
+  render();
+};
+if (!canManage) document.getElementById('toggle-deleted').style.display = 'none';
+setView(view);
 document.addEventListener('keydown', (e) => {
   if (!dlg.open) return;
   if (e.key === 'Escape') { e.preventDefault(); dlg.close(); }

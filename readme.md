@@ -26,8 +26,8 @@
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| S0 | 工程骨架与基础设施 | ⬜ 待开始 |
-| S1 | 登录与 API 客户端（WBI / buvid3） | ⬜ |
+| S0 | 工程骨架与基础设施 | ✅ |
+| S1 | 登录与 API 客户端（WBI / buvid3） | ✅（自动续期待补） |
 | S2 | 收藏夹扫描与 metadata 导出 | ⬜ |
 | S3 | 选流、引擎抽象、多线程下载队列 | ⬜ |
 | S4 | 转码/拼接队列与流水线 | ⬜ |
@@ -43,13 +43,28 @@
 
 ## 快速开始
 
-> 以下为计划中的用法，随实现进度在本文件同步更新。
-
 ```bash
 npm install
-bili login --qr                 # 扫码登录（凭据存 .local/cookies.json）
-bili whoami                     # 确认登录态
-bili doctor                     # 环境自检（Node / ffmpeg / 磁盘 / 连通性）
+
+# 已实现
+npm run bili -- login --qr       # 扫码登录（凭据存 .local/cookies.json）
+npm run bili -- login --manual   # 手动粘贴 Cookie
+npm run bili -- login --import ./cookies.txt   # 导入 Netscape / Cookie-Editor 导出
+npm run bili -- whoami           # 查看当前登录用户与会员状态
+npm run bili -- doctor           # 环境自检（Node / ffmpeg / 登录态 / 磁盘 / 连通性）
+
+# 计划中（随实现进度更新）
+bili scan                       # 扫描收藏夹，建目录并导出 outputs/index.json
+bili download                   # 按收藏时间倒序下载（默认起控制端）
+bili up <mid|主页URL|昵称>       # 按 UP 主从新到旧下载
+
+bili web                        # 打开控制端网页
+bili build-index                # 生成 outputs/index.html 媒体库
+bili serve                      # 静态服务（支持进度条拖动）
+
+bili status                     # 下载进度
+bili repair                     # 重跑失败 / 待转码任务
+```
 
 bili scan                       # 扫描收藏夹，建目录并导出 outputs/index.json
 bili download                   # 按收藏时间倒序下载（默认起控制端）

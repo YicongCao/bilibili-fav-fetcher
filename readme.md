@@ -113,6 +113,7 @@ npm run bili -- cache                             # 只清已完成/已跳过任
 npm run bili -- cache --all                       # 清空全部分片（未完成任务将重新完整下载）
 
 npm run bili -- status                            # 队列与任务状态概览（含 outputs 占用/上限）
+npm run bili -- reconcile [--dry-run]             # 任务库对账：成品已在盘上却还在队列里的补记为已完成
 npm run bili -- repair --failed                   # 重跑失败任务
 npm run bili -- repair --need-mux                 # 只重跑待封装任务
 npm run bili -- repair --engine ytdlp             # 强制用副引擎

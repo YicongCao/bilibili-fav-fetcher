@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { loginCommand } from './commands/login.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { doctorCommand } from './commands/doctor.js';
+import { scanCommand } from './commands/scan.js';
 import { log } from '../utils/logger.js';
 
 const program = new Command();
@@ -26,6 +27,16 @@ program
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {
     await whoamiCommand(opts);
+  });
+
+program
+  .command('scan')
+  .description('扫描收藏夹结构并导出 metadata')
+  .option('--fav <ids>', '只扫描指定收藏夹 id（逗号分隔）')
+  .option('--include-collected', '同时扫描收藏的他人收藏夹')
+  .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
+  .action(async (opts) => {
+    await scanCommand(opts);
   });
 
 program

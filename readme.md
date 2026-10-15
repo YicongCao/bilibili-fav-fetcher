@@ -217,10 +217,15 @@ outputs/
 ## 开发
 
 ```bash
-npm run lint      # tsc --noEmit
-npm test          # vitest run
-npm run build     # 编译到 dist/
+npm run lint             # tsc --noEmit
+npm test                 # vitest run（离线，不需要登录态）
+npm run test:fixtures    # 只跑接口契约测试（tests/fixtures 里的真实响应样本）
+npm run capture:fixtures # 重新抓取真实响应样本（需要登录态）
+npm run check:secret     # 提交前自检：阻断 SESSDATA / bili_jct / outputs 等误提交
+npm run build            # 编译到 dist/
 ```
+
+测试覆盖：`namer`（命名清洗/截断/重名）、`quality`（选流与降级链，走 fixture）、`cache`（分片回收）、`deleted`（删除标记闭环）、`scanner`（多收藏夹归属）、`static`（路径穿越防护）。接口契约测试读 `tests/fixtures/*.json`，B 站接口一改就会红。
 
 ## 安全与合规
 

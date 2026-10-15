@@ -1,0 +1,31 @@
+{
+  "name": "bilibili-fav-fetcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "哔哩哔哩收藏夹下载器：扫描收藏夹、离线下载视频/弹幕/封面，并生成本地媒体库",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "bili": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "bili": "tsx src/cli/index.ts",
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/qrcode-terminal": "^0.12.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

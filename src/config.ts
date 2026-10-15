@@ -1,6 +1,19 @@
+import os from 'node:os';
+import path from 'node:path';
 import { readJson } from './utils/fsx.js';
 
 export interface Config {
+  /** outputs 目录占用上限等全局限制 */
+  limits: {
+    /** outputs 目录总占用上限（GB）；null 表示不限制 */
+    maxOutputGB: number | null;
+    /** 达到上限的该比例时先告警 */
+    warnRatio: number;
+    /** 目录体积扫描的缓存有效期（ms） */
+    checkEveryMs: number;
+    /** 超限时自动暂停下载队列 */
+    pauseOnExceed: boolean;
+  };
   auth: { cookieFile: string };
   output: {
     root: string;
@@ -82,6 +95,7 @@ export interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
+  limits: { maxOutputGB: 500, warnRatio: 0.9, checkEveryMs: 60_000, pauseOnExceed: true },
   auth: { cookieFile: '.local/cookies.json' },
   output: {
     root: 'outputs',
@@ -172,15 +186,41 @@ function merge<T>(base: T, patch: DeepPartial<T> | null | undefined): T {
 
 let cached: Config | null = null;
 
+/** CLI --out 传入的 outputs 根目录（优先级最高） */
+let cliOutputRoot: string | null = null;
+
+export function setCliOutputRoot(dir: string | null): void {
+  cliOutputRoot = dir && dir.trim() ? dir.trim() : null;
+}
+
+export function getCliOutputRoot(): string | null {
+  return cliOutputRoot;
+}
+
+/** 展开 ~ 开头的路径 */
+export function expandHome(p: string): string {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return path.posix.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+/** outputs 根目录优先级：CLI --out > 环境变量 BILI_OUT > config.json output.root > 默认 outputs */
+function applyRootOverride(cfg: Config): void {
+  const override = cliOutputRoot ?? (process.env.BILI_OUT?.trim() || null);
+  cfg.output.root = expandHome((override ?? cfg.output.root).trim());
+}
+
 export async function loadConfig(file = 'config.json'): Promise<Config> {
   const fromFile = await readJson<DeepPartial<Config>>(file);
   cached = merge(DEFAULT_CONFIG, fromFile);
+  applyRootOverride(cached);
   return cached;
 }
 
 export function getConfig(): Config {
   if (!cached) {
-    cached = DEFAULT_CONFIG;
+    cached = merge(DEFAULT_CONFIG, null);
+    applyRootOverride(cached);
   }
   return cached;
 }

@@ -50,7 +50,13 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
     await checkEngines(store.cookies);
   }
 
-  const { url, close } = await startServer({ store: taskStore, queue, root: config.output.root });
+  const { url, close } = await startServer({
+    store: taskStore,
+    queue,
+    root: config.output.root,
+    cookies: store.cookies,
+    cookieExpiresAt: store.expiresAt ?? null,
+  });
 
   if (config.control.openBrowser && !options.noOpen) {
     execFile('open', [url], () => undefined);

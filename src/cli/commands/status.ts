@@ -3,6 +3,7 @@ import { TaskStore } from '../../core/taskStore.js';
 import { DownloadQueue } from '../../core/queue.js';
 import { log } from '../../utils/logger.js';
 import { formatBytes } from '../../utils/fsx.js';
+import { outputUsage } from '../../core/disk.js';
 
 export async function statusCommand(): Promise<void> {
   const config = await loadConfig();
@@ -14,6 +15,10 @@ export async function statusCommand(): Promise<void> {
   const count = (stage: string) => all.filter((t) => t.stage === stage).length;
   log.print('任务状态');
   log.print('--------');
+  const usage = await outputUsage(config.output.root);
+  log.print(
+    `outputs：${usage.root}    占用 ${formatBytes(usage.usedBytes)}${usage.limitBytes ? ` / 上限 ${formatBytes(usage.limitBytes)}` : ''}    卷剩余 ${formatBytes(usage.freeBytes)}`,
+  );
   log.print(`队列状态：${snapshot.status}    队列长度：${snapshot.order.length}    剩余：${queue.remaining()}`);
   log.print(`在途：${snapshot.inflight.length}    延迟中：${snapshot.delayed.length}`);
   log.print(

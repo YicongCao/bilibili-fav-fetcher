@@ -33,7 +33,7 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
 
   const index = await readJson<IndexFile>(`${config.output.root}/index.json`);
   if (!index) {
-    log.error('未找到 outputs/index.json，请先执行：npm run bili -- scan');
+    log.error(`未找到 ${config.output.root}/index.json，请先执行：npm run bili -- scan --out "${config.output.root}"`);
     process.exitCode = 1;
     return;
   }

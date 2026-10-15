@@ -9,11 +9,24 @@ import { statusCommand } from './commands/status.js';
 import { repairCommand } from './commands/repair.js';
 import { upCommand } from './commands/up.js';
 import { webCommand } from './commands/web.js';
+import { setCliOutputRoot } from '../config.js';
 import { log } from '../utils/logger.js';
+
+const OUT_DESC = '指定 outputs 目录（默认 outputs；优先级 --out > BILI_OUT > config.json）';
+
+/** 记录 --out 并原样返回值（commander 的 option 转换函数） */
+function outArg(v: string): string {
+  setCliOutputRoot(v);
+  return v;
+}
 
 const program = new Command();
 
-program.name('bili').description('哔哩哔哩收藏夹下载器').version('0.1.0');
+program
+  .name('bili')
+  .description('哔哩哔哩收藏夹下载器')
+  .version('0.1.0')
+  .option('--out <dir>', OUT_DESC, outArg);
 
 program
   .command('login')
@@ -39,6 +52,7 @@ program
   .description('扫描收藏夹结构并导出 metadata')
   .option('--fav <ids>', '只扫描指定收藏夹 id（逗号分隔）')
   .option('--include-collected', '同时扫描收藏的他人收藏夹')
+  .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {
     await scanCommand(opts);
@@ -53,6 +67,7 @@ program
   .option('--pages <rule>', 'all | collected | first')
   .option('--dry-run', '只列出将要下载的任务')
   .option('--force', '忽略已存在产物')
+  .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {
     await downloadCommand({
@@ -74,6 +89,7 @@ program
   .option('--keyword <kw>', '标题关键词过滤')
   .option('--limit <n>', '只处理前 n 个任务')
   .option('--dry-run', '只列出任务')
+  .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (target, opts) => {
     await upCommand(target, {
@@ -93,6 +109,7 @@ program
   .option('--no-open', '不自动打开浏览器')
   .option('--limit <n>', '只规划前 n 个任务')
   .option('--no-download', '只开看板，不启动下载')
+  .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {
     await webCommand({
@@ -109,6 +126,7 @@ program
 program
   .command('status')
   .description('查看队列与任务状态')
+  .option('--out <dir>', OUT_DESC, outArg)
   .action(async () => {
     await statusCommand();
   });
@@ -119,6 +137,7 @@ program
   .option('--failed', '只重跑失败任务')
   .option('--need-mux', '只重跑待封装任务')
   .option('--engine <name>', 'native | ytdlp，强制指定引擎')
+  .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {
     await repairCommand(opts);
@@ -127,6 +146,7 @@ program
 program
   .command('doctor')
   .description('环境自检（Node / ffmpeg / 登录态 / 磁盘 / 连通性）')
+  .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {
     await doctorCommand(opts);

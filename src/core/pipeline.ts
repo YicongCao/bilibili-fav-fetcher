@@ -2,11 +2,14 @@ import path from 'node:path';
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { getConfig } from '../config.js';
+import { formatBytes } from '../utils/fsx.js';
 import { log } from '../utils/logger.js';
 import { muxToContainer } from './muxer.js';
 import { probeFile } from '../utils/ffmpeg.js';
 import { finalizeTask } from './finalize.js';
 import { Watchdog } from './watchdog.js';
+import { outputUsage, isOverLimit, isNearLimit, type DiskUsage } from './disk.js';
+import { waitMuxGate } from './muxGate.js';
 import { createEngine, decideEngine, type EngineName } from './engines/index.js';
 import type { TaskRecord } from '../types/index.js';
 import type { TaskStore } from './taskStore.js';
@@ -20,6 +23,10 @@ export interface PipelineContext {
 
 export interface PipelineHooks {
   onTaskUpdate?: (task: TaskRecord) => void;
+  /** outputs 超出占用上限 */
+  onOverLimit?: (usage: DiskUsage) => void;
+  /** 接近占用上限 */
+  onNearLimit?: (usage: DiskUsage) => void;
 }
 
 export function destPath(task: TaskRecord, root: string): string {
@@ -91,6 +98,9 @@ async function processTask(task: TaskRecord, ctx: PipelineContext, hooks: Pipeli
       task.stage = 'muxing';
       ctx.store.upsert(task);
       await mkdir(path.dirname(dest), { recursive: true });
+
+      // 全局转码闸门：暂停时在这里挂起，已下载的分片保留
+      await waitMuxGate();
 
       const label =
         task.partTitle && task.totalPages > 1 ? `${task.title} P${task.page} ${task.partTitle}` : task.title;
@@ -167,6 +177,7 @@ export async function runQueue(
   const worker = async () => {
     for (;;) {
       if (ctx.queue.status !== 'running') return;
+      if (await limitExceeded(ctx, hooks)) return;
       const task = ctx.queue.take();
       if (!task) return;
       await processTask(task, ctx, hooks);
@@ -183,6 +194,26 @@ export async function runQueue(
     failed: all.filter((t) => t.stage === 'failed').length,
     skipped: all.filter((t) => t.stage === 'skipped').length,
   };
+}
+
+/** outputs 占用上限检查：超限则暂停队列（在途任务继续跑完，不丢分片） */
+async function limitExceeded(ctx: PipelineContext, hooks: PipelineHooks): Promise<boolean> {
+  const cfg = getConfig();
+  if (cfg.limits.maxOutputGB === null) return false;
+
+  const usage = await outputUsage(cfg.output.root);
+  if (isOverLimit(usage)) {
+    if (cfg.limits.pauseOnExceed) {
+      ctx.queue.pause();
+      log.warn(
+        `outputs 已达占用上限 ${formatBytes(usage.limitBytes ?? 0)}（当前 ${formatBytes(usage.usedBytes)}），已暂停下载队列`,
+      );
+    }
+    hooks.onOverLimit?.(usage);
+    return true;
+  }
+  if (isNearLimit(usage)) hooks.onNearLimit?.(usage);
+  return false;
 }
 
 /** 清理孤儿临时文件 */

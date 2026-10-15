@@ -6,6 +6,10 @@ import { bus, toSummary, type ServerEvent } from './events.js';
 import { getConfig, setConfig, type Config } from '../config.js';
 import { log } from '../utils/logger.js';
 import { formatBytes } from '../utils/fsx.js';
+import { nav } from '../api/nav.js';
+import { expiresInDays } from '../auth/cookie.js';
+import { outputUsage } from '../core/disk.js';
+import { isMuxPaused, setMuxPaused } from '../core/muxGate.js';
 import type { TaskStore } from '../core/taskStore.js';
 import type { DownloadQueue } from '../core/queue.js';
 import type { TaskRecord } from '../types/index.js';
@@ -14,6 +18,43 @@ export interface ServerContext {
   store: TaskStore;
   queue: DownloadQueue;
   root: string;
+  /** 登录态（用于展示登录/会员状态），缺失时 dashboard 显示未登录 */
+  cookies?: Record<string, string>;
+  cookieExpiresAt?: number | null;
+}
+
+interface AuthSnapshot {
+  login: boolean;
+  uname?: string;
+  mid?: number;
+  vip?: string;
+  level?: number;
+  days?: number | null;
+  checkedAt: number;
+}
+
+let authCache: AuthSnapshot = { login: false, checkedAt: 0 };
+
+/** 刷新登录态快照（5 分钟内复用，失败保留上次结果） */
+async function refreshAuth(ctx: ServerContext): Promise<AuthSnapshot> {
+  if (!ctx.cookies || Object.keys(ctx.cookies).length === 0) return { login: false, checkedAt: Date.now() };
+  try {
+    const info = await nav(ctx.cookies);
+    const vip = info.vip?.type === 2 ? '大会员' : info.vip?.type === 1 ? '会员' : '非会员';
+    authCache = {
+      login: Boolean(info.isLogin),
+      uname: info.uname,
+      mid: info.mid,
+      vip,
+      level: info.level_info?.current_level,
+      days: expiresInDays(ctx.cookieExpiresAt ?? undefined),
+      checkedAt: Date.now(),
+    };
+  } catch (err) {
+    log.debug(`登录态刷新失败：${(err as Error).message}`);
+    authCache = { ...authCache, checkedAt: Date.now() };
+  }
+  return authCache;
 }
 
 function json(res: ServerResponse, data: unknown, code = 200): void {
@@ -88,6 +129,63 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
         delayed: snapshot.delayed.length,
         ...snapshot.stats,
       });
+      return;
+    }
+
+    if (route === '/api/dashboard') {
+      const all = ctx.store.all();
+      const active = all.filter((t) => t.stage === 'downloading' || t.stage === 'muxing' || t.stage === 'finalizing');
+      const snapshot = ctx.queue.snapshot();
+      const usage = await outputUsage(ctx.root);
+      const auth = Date.now() - authCache.checkedAt > 300_000 ? await refreshAuth(ctx) : authCache;
+      const speedBps = all
+        .filter((t) => t.stage === 'downloading')
+        .reduce((sum, t) => sum + (t.progress?.speedBps ?? 0), 0);
+      json(res, {
+        root: ctx.root,
+        tasks: {
+          total: all.length,
+          running: active.length,
+          downloading: all.filter((t) => t.stage === 'downloading').length,
+          muxing: all.filter((t) => t.stage === 'muxing').length,
+          queued: all.filter((t) => t.stage === 'queued').length,
+          done: all.filter((t) => t.stage === 'done').length,
+          failed: all.filter((t) => t.stage === 'failed').length,
+          remaining: ctx.queue.remaining(),
+        },
+        videos: {
+          downloaded: all.filter((t) => t.stage === 'done' || t.stage === 'skipped').length,
+          bytesDone: snapshot.stats.bytesDone,
+        },
+        speedBps,
+        queue: { status: snapshot.status, inflight: snapshot.inflight.length, delayed: snapshot.delayed.length },
+        mux: { paused: isMuxPaused() },
+        disk: {
+          root: usage.root,
+          usedBytes: usage.usedBytes,
+          cacheBytes: usage.cacheBytes,
+          limitBytes: usage.limitBytes,
+          ratio: usage.ratio,
+          freeBytes: usage.freeBytes,
+          totalBytes: usage.totalBytes,
+          at: usage.at,
+        },
+        auth,
+      });
+      return;
+    }
+
+    if (route === '/api/mux/pause' && req.method === 'POST') {
+      setMuxPaused(true);
+      log.warn('已暂停全局转码（已下载分片保留）');
+      json(res, { ok: true, paused: true });
+      return;
+    }
+
+    if (route === '/api/mux/resume' && req.method === 'POST') {
+      setMuxPaused(false);
+      log.info('已恢复全局转码');
+      json(res, { ok: true, paused: false });
       return;
     }
 
@@ -179,6 +277,8 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not Found');
   });
+
+  void refreshAuth(ctx);
 
   await new Promise<void>((resolve) => server.listen(config.control.port, config.control.host, resolve));
   const url = `http://${config.control.host}:${config.control.port}`;

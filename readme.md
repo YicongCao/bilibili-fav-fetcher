@@ -7,6 +7,8 @@
 ## 特性
 
 - **登录态**：扫码 / 手动粘贴 / 导入 Cookie，凭据本地保存（`.local/cookies.json`，权限 0600）
+- **自定义输出目录**：`--out /Volumes/xxx/outputs`（或 `BILI_OUT` 环境变量、`config.json` 里的 `output.root`），可直接指向外置硬盘
+- **占用上限**：`limits.maxOutputGB`（默认 500GB）限制 outputs 目录总占用，超限自动暂停下载队列
 - **收藏夹扫描**：按收藏夹名称建目录，导出 `outputs/index.json` 全量 metadata
 - **UP 主模式**：给 mid / 主页 URL / 昵称，按发布时间从新到旧下载全部投稿
 - **最高可用画质**：自动选账号可播的最高档（大会员即 8K / 4K / HDR / 杜比视界 / 60fps），无权益自动降级
@@ -18,7 +20,7 @@
 - **多 P**：全部下载，用 `[P1] [P2]…` 后缀区分
 - **超时与停滞**：连接 / 首字节 / 读空闲 / 速率停滞 / 任务总时长 / 转码停滞多级超时，停滞三级响应（重连 → 重建会话 → 切引擎）
 - **队列可中断可恢复**：任务粒度断点续传；首次重试排队首，第 2 次起排队尾并退避
-- **控制端网页**：实时看板（进度 / 速度 / 队列占用 / 停滞提示 / 日志）+ 任务级控制 + 配置热更新
+- **控制端网页**：dashboard（任务数 / 已下载视频与占用 / 总速度 / 磁盘 / 登录态·会员状态 + 一键暂停继续下载与转码）+ 实时任务表 + 任务级控制 + 配置热更新
 
 ## 实现进度
 
@@ -59,6 +61,17 @@ npm run bili -- whoami                            # 查看当前登录用户与�
 npm run bili -- doctor                            # 环境自检（Node / ffmpeg / 登录态 / 磁盘 / 连通性）
 ```
 
+### 指定 outputs 目录
+
+默认 `./outputs`。三种方式，优先级 `--out` > 环境变量 `BILI_OUT` > `config.json` 的 `output.root`：
+
+```bash
+npm run bili -- scan --out "/Volumes/Lenovo 1TB/outputs"
+export BILI_OUT="/Volumes/Lenovo 1TB/outputs"     # 之后所有命令都走这里
+```
+
+`--out` 是所有子命令的通用选项（`scan` / `download` / `up` / `web` / `status` / `repair` / `doctor`），路径带空格时加引号即可。
+
 ### 扫描与下载
 
 ```bash
@@ -83,7 +96,10 @@ npm run bili -- web --port 8899 --no-open         # 换端口、不自动打开
 npm run bili -- web --no-download                 # 只看板，不启动下载
 ```
 
-页面提供：总览条（各状态计数 / 总进度 / 实时速度 / ETA / 下载 x/3 + 转码 y/3 / 磁盘剩余）、任务表（画质徽标 / 阶段 / 分片进度 / 引擎 / 停滞提示）、任务级控制（暂停 / 继续 / 取消 / 重试 / 插队 / 换引擎）、全局控制、配置热更新、日志 tail。
+页面提供：
+
+- **dashboard**：任务总数 / 进行中（下载·转码）/ 已完成 / 已下载视频数与占用空间（含上限进度条）/ 总下载速度 MB/s / 磁盘剩余 / 登录态与会员状态；两个按钮分别**暂停 / 继续全局下载**与**暂停 / 继续全局转码**（转码暂停时已下载分片保留，恢复后继续封装）
+- **任务表**（画质徽标 / 阶段 / 分片进度 / 引擎 / 停滞提示）+ 任务级控制（暂停 / 继续 / 取消 / 重试 / 插队）、配置热更新、日志 tail
 
 ### 查询与补偿
 
@@ -125,6 +141,7 @@ outputs/
 | 分组 | 键 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `auth` | `cookieFile` | `.local/cookies.json` | 登录态路径，也可用 `--cookie-file` 覆盖 |
+| `limits` | `maxOutputGB` / `warnRatio` / `pauseOnExceed` | `500` / `0.9` / `true` | outputs 总占用上限（GB）、告警比例、超限自动暂停 |
 | `output` | `root` / `filenameTemplate` / `partSuffix` | `outputs` / `{title} [P{p}] [{bvid}]` / `auto` | 目录与命名 |
 | `output` | `sidecarMeta` / `nfo` | `true` / `false` | 同名 `.meta.json`、可选 `.nfo` |
 | `download` | `maxParallelTasks` / `maxStreamsPerTask` | `3` / `3` | 下载任务并发、单流 Range 分片数 |
@@ -152,7 +169,8 @@ outputs/
 
 ## 已知限制
 
-- **中间分片不自动清理**：任务封装成功后 `outputs/.cache/media/<taskId>/` 里的分片仍会保留，长期下载会明显占盘。当前需手动删除（只删 `stage === 'done'` 对应目录即可，不影响已完成产物）；补上自动清理在后续打磨阶段。
+- **中间分片不自动清理**：任务封装成功后 `outputs/.cache/media/<taskId>/` 里的分片仍会保留（dashboard 会单独显示「缓存」占用）。当前需手动删除已完成任务的目录；补上自动清理在后续打磨阶段。
+- **占用上限只做「不再新增」**：达到 `limits.maxOutputGB` 后暂停下载队列，但不会自动删除已有内容（在途任务会跑完）。
 - **登录态不自动续期**：`refresh_token` 续期尚未实现，cookie 过期后需重新 `bili login`。
 - **控制端默认端口 8765**：若被其他程序（如编辑器）占用，用 `bili web --port <其他端口>`。
 - HLS / 加密 m3u8 源目前未做专项样本验证；主引擎优先处理 DASH 与多段 durl。

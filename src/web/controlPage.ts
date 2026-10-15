@@ -44,6 +44,7 @@ export function renderControlPage(): string {
   .card .s { color:var(--muted); font-size:11px; margin-top:2px; }
   .dash-actions { display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap; }
   .dash-actions .muted { color:var(--muted); font-size:12px; }
+  .dash-actions a { text-decoration:none; }
   .usage { margin-top:10px; display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted); }
   .usage .bar { flex:1; }
   .usage .bar > i.over { background:var(--err); }
@@ -81,6 +82,7 @@ export function renderControlPage(): string {
   <div class="dash-actions">
     <button id="btn-dl" class="primary">暂停下载</button>
     <button id="btn-mux" class="primary">暂停转码</button>
+    <a href="/library" target="_blank" rel="noreferrer"><button>打开媒体库</button></a>
     <span class="muted" id="d-root"></span>
   </div>
   <div class="usage">

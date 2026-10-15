@@ -38,7 +38,7 @@
 | S7 | 队列、任务库、超时、断点续传、双引擎切换 | ✅ |
 | S8 | UP 主模式 | ✅ |
 | S9 | 控制端网页 | ✅ |
-| S10 | 媒体库索引页与播放器 | 🚧（`library/scanLibrary.ts`、`web/libraryPage.ts` 已写，`build-index` / `serve` 命令待接线） |
+| S10 | 媒体库索引页与播放器 | ✅ |
 | S11 | 打磨与文档定稿 | ⬜ |
 
 详细设计见 [PLAN.md](./PLAN.md)。
@@ -110,12 +110,14 @@ npm run bili -- repair --need-mux                 # 只重跑待封装任务
 npm run bili -- repair --engine ytdlp             # 强制用副引擎
 ```
 
-### 待实现（S10）
+### 媒体库索引页与播放
 
 ```bash
-bili build-index                                  # 生成 outputs/index.html + library.js 媒体库
-bili serve --port 8765                            # 静态服务（支持 Range，可拖动进度条）
+npm run bili -- build-index                       # 生成 outputs/index.html + library.js（离线可用）
+npm run bili -- serve --port 8765                 # 静态服务（支持 Range，可拖动进度条）
 ```
+
+`build-index` 读取 `index.json`（优先每个视频的同名 `.meta.json`）生成 `library.js` / `library.json` 与单文件 `index.html`：收藏夹 / UP 筛选、搜索、四种排序、封面网格、点击播放（`<track>` 加载 ass/srt、分 P 切换、原页面链接）。双击 `index.html` 走 `file://` 也能出列表；要拖动进度条就用 `bili serve`。控制端页面右上角也有「打开媒体库」入口（`/library`）。
 
 ## 产物目录
 

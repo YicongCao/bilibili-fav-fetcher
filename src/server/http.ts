@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { renderControlPage } from '../web/controlPage.js';
+import { renderLibraryPage } from '../web/libraryPage.js';
+import { safeJoin, sendFile } from './static.js';
 import { bus, toSummary, type ServerEvent } from './events.js';
 import { getConfig, setConfig, type Config } from '../config.js';
 import { log } from '../utils/logger.js';
@@ -258,21 +260,16 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
       return;
     }
 
-    // 静态媒体库（图片 / 视频 / 索引页）
-    const filePath = path.join(ctx.root, decodeURIComponent(route.replace(/^\/+/, '')));
-    if (filePath.startsWith(path.resolve(ctx.root))) {
-      try {
-        const data = await readFile(filePath);
-        const ext = path.extname(filePath).toLowerCase();
-        const type =
-          ext === '.mp4' || ext === '.mov' ? 'video/mp4' : ext === '.jpg' || ext === '.png' ? `image/${ext.slice(1)}` : 'application/octet-stream';
-        res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes' });
-        res.end(data);
-        return;
-      } catch {
-        /* 继续 404 */
-      }
+    // 媒体库页面（与控制端同进程，静态资源走 outputs 根目录）
+    if (route === '/library' || route === '/index.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderLibraryPage());
+      return;
     }
+
+    // 静态媒体库（图片 / 视频 / 字幕 / 索引数据，支持 Range）
+    const filePath = safeJoin(ctx.root, decodeURIComponent(route));
+    if (filePath && (await sendFile(req, res, filePath))) return;
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not Found');
@@ -280,7 +277,14 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
 
   void refreshAuth(ctx);
 
-  await new Promise<void>((resolve) => server.listen(config.control.port, config.control.host, resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        reject(new Error(`控制端端口 ${config.control.port} 已被占用，换一个：bili web --port ${config.control.port + 1}`));
+      } else reject(err);
+    });
+    server.listen(config.control.port, config.control.host, resolve);
+  });
   const url = `http://${config.control.host}:${config.control.port}`;
   log.info(`控制端已启动：${url}`);
   void formatBytes(0);

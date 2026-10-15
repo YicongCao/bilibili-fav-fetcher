@@ -9,6 +9,8 @@ import { statusCommand } from './commands/status.js';
 import { repairCommand } from './commands/repair.js';
 import { upCommand } from './commands/up.js';
 import { webCommand } from './commands/web.js';
+import { buildIndexCommand } from './commands/buildIndex.js';
+import { serveCommand } from './commands/serve.js';
 import { setCliOutputRoot } from '../config.js';
 import { log } from '../utils/logger.js';
 
@@ -121,6 +123,25 @@ program
       noDownload: opts.download === false,
       cookieFile: opts.cookieFile,
     });
+  });
+
+program
+  .command('build-index')
+  .description('生成媒体库索引页 outputs/index.html + library.js')
+  .option('--out <dir>', OUT_DESC, outArg)
+  .action(async () => {
+    await buildIndexCommand();
+  });
+
+program
+  .command('serve')
+  .description('静态媒体库服务（支持 Range，可拖动进度条）')
+  .option('--port <n>', '端口（默认同 control.port）')
+  .option('--host <ip>', '监听地址', '127.0.0.1')
+  .option('--no-open', '不自动打开浏览器')
+  .option('--out <dir>', OUT_DESC, outArg)
+  .action(async (opts) => {
+    await serveCommand({ port: opts.port ? Number(opts.port) : undefined, host: opts.host, noOpen: opts.open === false });
   });
 
 program

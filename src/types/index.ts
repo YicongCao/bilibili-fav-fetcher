@@ -66,6 +66,40 @@ export interface IndexFile {
   skipped: { nonVideo: number; dead: number };
 }
 
+export interface TaskRecord {
+  id: string;
+  source: 'favorite' | 'up';
+  bvid: string;
+  aid: number;
+  cid: number;
+  page: number;
+  partTitle?: string;
+  title: string;
+  up: { mid: number; name: string };
+  orderKey: number;
+  duration: number;
+  cover: string;
+  desc?: string;
+  favTime: number;
+  pubDate: number;
+  totalPages: number;
+  outDir: string;
+  baseName: string;
+  container: 'mp4' | 'mov';
+  stage: 'queued' | 'planning' | 'downloading' | 'muxing' | 'finalizing' | 'done' | 'failed' | 'paused' | 'skipped';
+  priority: number;
+  streams?: {
+    video?: { url: string; backupUrls: string[]; qualityId: number; qualityLabel: string; codec: string; width: number; height: number; fps: number; hdr: boolean; bytes: number };
+    audio?: { url: string; backupUrls: string[]; qualityId: number; qualityLabel: string; codec: string; bytes: number };
+  };
+  progress: { bytesDone: number; bytesTotal: number; speedBps: number; etaSec: number };
+  quality?: { want: string; got: string; hdr: boolean; fps: number; codec: string; width: number; height: number; degraded: boolean };
+  retryCount: number;
+  error?: { code: string; message: string; at: number };
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface FavoritesFile {
   schema: string;
   generatedAt: number;

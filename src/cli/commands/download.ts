@@ -4,6 +4,7 @@ import { readJson } from '../../utils/fsx.js';
 import { log } from '../../utils/logger.js';
 import { buildTasks } from '../../core/planner.js';
 import { runPipeline, destPath } from '../../core/pipeline.js';
+import { writeDanmaku } from '../../core/finalize.js';
 import type { IndexFile } from '../../types/index.js';
 
 export interface DownloadOptions {
@@ -58,7 +59,11 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
   }
 
   const started = Date.now();
-  const result = await runPipeline(store.cookies!, tasks);
+  const result = await runPipeline(store.cookies!, tasks, {
+    finalize: async (task, file) => {
+      await writeDanmaku(store.cookies!, task, file);
+    },
+  });
 
   log.print('');
   log.print(`完成 ${result.done} 个，失败 ${result.failed} 个，跳过 ${result.skipped} 个，用时 ${((Date.now() - started) / 1000).toFixed(1)}s`);

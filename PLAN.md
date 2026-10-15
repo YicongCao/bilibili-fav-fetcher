@@ -1003,6 +1003,7 @@ bili repair [--failed|--need-mux]               # 补偿重跑
 6. **DoD**：`bili build-index && bili serve` 后浏览器可浏览全部视频、点击可播、字幕可选；双击 `outputs/index.html` 走 `file://` 也能出列表
 
 ### S11 · 打磨与文档定稿（3h）
+0. **UI 改版（iOS 风格）**：控制端 + 媒体库统一设计令牌（iOS 语义色、20px+ 圆角、`backdrop-filter` 毛玻璃、`-apple-system/PingFang` 字阶、数字 `tabular-nums`）；控制端＝玻璃小组件仪表盘 + 分段控件 + 胶囊三级按钮 + iOS 分组列表 + Toast/iOS 确认框；媒体库＝毛玻璃顶栏 + 大圆角悬浮卡片 + 底部抽屉播放器（含空格/←→/Esc 快捷键）；两页在 1440/1180/900 三档宽度下均无横向溢出
 1. `README.md` **定稿**（前面各小节已持续更新）：补齐安装（`brew install ffmpeg`）、快速开始、常见问题与故障排查、完整配置说明
 2. 边界处理：磁盘不足预警、超长标题、空收藏夹、cookie 过期交互提示
 3. 性能：1000+ 条目的索引分页/虚拟滚动；扫描增量更新（只拉新增）

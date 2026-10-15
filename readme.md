@@ -97,6 +97,8 @@ npm run bili -- web --port 8899 --no-open         # 换端口、不自动打开
 npm run bili -- web --no-download                 # 只看板，不启动下载
 ```
 
+界面按 iOS 设计语言统一（深色 + 毛玻璃顶栏、20px 圆角玻璃卡片、iOS 语义色、分段控件、胶囊三级按钮、数字等宽对齐），在 1440 / 1180 / 900 三档宽度下均无横向溢出。
+
 页面提供：
 
 - **dashboard**：任务总数 / 进行中（下载·转码）/ 已完成 / 已下载视频数与占用空间（含上限进度条）/ 总下载速度 MB/s / 磁盘剩余 / 登录态与会员状态；两个按钮分别**暂停 / 继续全局下载**与**暂停 / 继续全局转码**（转码暂停时已下载分片保留，恢复后继续封装）
@@ -123,7 +125,9 @@ npm run bili -- build-index                       # 生成 outputs/index.html + 
 npm run bili -- serve --port 8765                 # 静态服务（支持 Range，可拖动进度条）
 ```
 
-`build-index` 读取 `index.json`（优先每个视频的同名 `.meta.json`）生成 `library.js` / `library.json` 与单文件 `index.html`：收藏夹 / UP 筛选、搜索、四种排序、封面网格、点击播放（`<track>` 加载 ass/srt、分 P 切换、原页面链接）。双击 `index.html` 走 `file://` 也能出列表；要拖动进度条就用 `bili serve`。控制端页面右上角也有「打开媒体库」入口（`/library`）。
+`build-index` 读取 `index.json`（优先每个视频的同名 `.meta.json`）生成 `library.js` / `library.json` 与单文件 `index.html`；控制端运行时会**自动重建**（启动时一次 + 每完成一个任务防抖重建），也可 `POST /api/library/rebuild` 手动触发。
+
+页面同样是 iOS 风格：毛玻璃 sticky 顶栏（搜索 / 收藏夹 / UP / 排序）、16:9 封面大圆角卡片（悬浮微放大、画质与 HDR 角标、时长胶囊）、点击弹出**底部抽屉播放器**（`<track>` 加载 ass/srt、分 P 切换、原页面链接，快捷键 `空格` 播放暂停、`←/→` ±5s、`Esc` 关闭）。双击 `index.html` 走 `file://` 也能出列表；要拖动进度条就用 `bili serve`。控制端页面也有「打开媒体库」入口（`/library`）。
 
 ## 产物目录
 

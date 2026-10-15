@@ -5,6 +5,8 @@ import { whoamiCommand } from './commands/whoami.js';
 import { doctorCommand } from './commands/doctor.js';
 import { scanCommand } from './commands/scan.js';
 import { downloadCommand } from './commands/download.js';
+import { statusCommand } from './commands/status.js';
+import { repairCommand } from './commands/repair.js';
 import { log } from '../utils/logger.js';
 
 const program = new Command();
@@ -60,6 +62,24 @@ program
       force: opts.force,
       cookieFile: opts.cookieFile,
     });
+  });
+
+program
+  .command('status')
+  .description('查看队列与任务状态')
+  .action(async () => {
+    await statusCommand();
+  });
+
+program
+  .command('repair')
+  .description('补偿失败 / 未完成任务')
+  .option('--failed', '只重跑失败任务')
+  .option('--need-mux', '只重跑待封装任务')
+  .option('--engine <name>', 'native | ytdlp，强制指定引擎')
+  .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
+  .action(async (opts) => {
+    await repairCommand(opts);
   });
 
 program

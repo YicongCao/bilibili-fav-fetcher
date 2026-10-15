@@ -128,6 +128,7 @@ export async function buildTasks(
         priority: 0,
         progress: { bytesDone: 0, bytesTotal: 0, speedBps: 0, etaSec: 0 },
         retryCount: 0,
+        engine: 'native',
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });

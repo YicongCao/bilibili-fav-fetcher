@@ -5,91 +5,89 @@ import { selectBest, type QualityResult } from '../quality.js';
 import { downloadFile } from '../downloader.js';
 import { getConfig } from '../../config.js';
 import { log } from '../../utils/logger.js';
-import { WEB_REFERER } from '../../api/client.js';
+import type { DownloadEngine, MediaPlanResult, RunHooks } from './types.js';
 import type { TaskRecord } from '../../types/index.js';
 
 export const NATIVE_HEADERS = {
-  Referer: WEB_REFERER,
+  Referer: 'https://www.bilibili.com/',
   'User-Agent':
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
 };
 
-export interface MediaPlan {
-  quality: QualityResult;
-  videoFile: string;
-  audioFile?: string;
-  cacheDir: string;
+export interface NativePlan extends MediaPlanResult {
+  raw: QualityResult;
 }
 
-/** 主引擎（native）：选流并给出本地缓存路径 */
-export async function planMedia(cookies: Record<string, string>, task: TaskRecord): Promise<MediaPlan> {
-  const config = getConfig();
-  const data = await playurl(cookies, task.bvid, task.cid, config.download.fnval);
-  const quality = selectBest(data, config.download, task.duration);
-  if (!quality) throw Object.assign(new Error('未获取到可用视频流'), { code: 'NO_STREAM' });
+/** 主引擎（自研）：选流 + 多线程分片下载，零外部依赖 */
+export class NativeEngine implements DownloadEngine {
+  readonly name = 'native' as const;
 
-  const cacheDir = path.join(config.output.root, '.cache', 'media', task.id);
-  await mkdir(cacheDir, { recursive: true });
-  return {
-    quality,
-    videoFile: path.join(cacheDir, 'video.m4s'),
-    audioFile: quality.audio ? path.join(cacheDir, 'audio.m4s') : undefined,
-    cacheDir,
-  };
-}
+  constructor(private readonly cookies: Record<string, string> = {}) {}
 
-/** 主引擎（native）：下载视频/音频流到缓存目录（分片 ≤3、可续传） */
-export async function downloadMedia(
-  cookies: Record<string, string>,
-  task: TaskRecord,
-  plan: MediaPlan,
-  hooks: {
-    onProgress?: (bytesDone: number, bytesTotal: number, speedBps: number) => void;
-    signal?: AbortSignal;
-  } = {},
-): Promise<{ videoFile: string; audioFile?: string }> {
-  const config = getConfig();
-  const headers = { ...NATIVE_HEADERS, Referer: `https://www.bilibili.com/video/${task.bvid}/` };
+  async healthcheck(): Promise<{ ok: boolean; version?: string; reason?: string }> {
+    return { ok: true, version: 'native-1.0' };
+  }
 
-  let done = 0;
-  const total = plan.quality.video.bytes + (plan.quality.audio?.bytes ?? 0);
-  const report = () => hooks.onProgress?.(done, total, 0);
+  async plan(task: TaskRecord): Promise<NativePlan> {
+    const config = getConfig();
+    const data = await playurl(this.cookies, task.bvid, task.cid, config.download.fnval);
+    const quality = selectBest(data, config.download, task.duration);
+    if (!quality) throw Object.assign(new Error('未获取到可用视频流'), { code: 'NO_STREAM' });
 
-  await downloadFile({
-    url: plan.quality.video.url,
-    backupUrls: plan.quality.video.backupUrls,
-    dest: plan.videoFile,
-    cookies,
-    headers,
-    threads: config.download.maxStreamsPerTask,
-    idleMs: config.timeout.idleMs,
-    signal: hooks.signal,
-    onProgress: (d) => {
-      done = d;
-      report();
-    },
-  });
+    const cacheDir = path.join(config.output.root, '.cache', 'media', task.id);
+    await mkdir(cacheDir, { recursive: true });
+    return {
+      kind: 'dash',
+      videoFile: path.join(cacheDir, 'video.m4s'),
+      audioFile: quality.audio ? path.join(cacheDir, 'audio.m4s') : undefined,
+      qualityLabel: `${quality.video.qualityLabel}${quality.video.hdr ? ' HDR' : ''}`,
+      hdr: quality.video.hdr,
+      fps: quality.video.fps,
+      codec: quality.video.codec,
+      width: quality.video.width,
+      height: quality.video.height,
+      degraded: quality.degraded,
+      raw: quality,
+    };
+  }
 
-  if (plan.quality.audio && plan.audioFile) {
-    const base = done;
+  async run(task: TaskRecord, plan: NativePlan, hooks: RunHooks): Promise<{ videoFile: string; audioFile?: string }> {
+    const config = getConfig();
+    const headers = { ...NATIVE_HEADERS, Referer: `https://www.bilibili.com/video/${task.bvid}/` };
+
+    const total = plan.raw.video.bytes + (plan.raw.audio?.bytes ?? 0);
+    let base = 0;
+
     await downloadFile({
-      url: plan.quality.audio.url,
-      backupUrls: plan.quality.audio.backupUrls,
-      dest: plan.audioFile,
-      cookies,
+      url: plan.raw.video.url,
+      backupUrls: plan.raw.video.backupUrls,
+      dest: plan.videoFile,
+      cookies: this.cookies,
       headers,
       threads: config.download.maxStreamsPerTask,
       idleMs: config.timeout.idleMs,
       signal: hooks.signal,
-      onProgress: (d) => {
-        done = base + d;
-        report();
-      },
+      onProgress: (d, _t, speed) => hooks.onProgress?.(d, total, speed),
     });
-  }
 
-  log.info(
-    `已下载 ${task.baseName}（${plan.quality.video.qualityLabel}${plan.quality.video.hdr ? ' HDR' : ''} ${plan.quality.video.width}x${plan.quality.video.height} ${plan.quality.video.fps}fps ${plan.quality.video.codec}）`,
-  );
-  return { videoFile: plan.videoFile, audioFile: plan.audioFile };
+    if (plan.raw.audio && plan.audioFile) {
+      const done = base + plan.raw.video.bytes;
+      await downloadFile({
+        url: plan.raw.audio.url,
+        backupUrls: plan.raw.audio.backupUrls,
+        dest: plan.audioFile,
+        cookies: this.cookies,
+        headers,
+        threads: config.download.maxStreamsPerTask,
+        idleMs: config.timeout.idleMs,
+        signal: hooks.signal,
+        onProgress: (d, _t, speed) => hooks.onProgress?.(done + d, total, speed),
+      });
+    }
+
+    log.info(
+      `已下载 ${task.baseName}（${plan.qualityLabel} ${plan.width}x${plan.height} ${plan.fps}fps ${plan.codec}）`,
+    );
+    return { videoFile: plan.videoFile, audioFile: plan.audioFile };
+  }
 }

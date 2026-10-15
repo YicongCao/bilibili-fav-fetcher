@@ -33,7 +33,8 @@ export async function readJson<T>(file: string): Promise<T | null> {
 export async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
   const target = resolvePath(file);
   await ensureDir(path.dirname(target));
-  const tmp = `${target}.tmp`;
+  // 唯一临时文件名：避免并发 flush 时相互覆盖导致 rename 失败
+  const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   await fs.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
   await fs.rename(tmp, target);
 }

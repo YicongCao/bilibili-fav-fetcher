@@ -108,7 +108,11 @@ export interface TaskRecord {
   progress: { bytesDone: number; bytesTotal: number; speedBps: number; etaSec: number };
   quality?: { want: string; got: string; hdr: boolean; fps: number; codec: string; width: number; height: number; degraded: boolean };
   retryCount: number;
+  /** 当前执行引擎 */
+  engine: 'native' | 'ytdlp';
+  engineHistory?: { engine: 'native' | 'ytdlp'; at: number; result: 'failed' | 'switched' }[];
   error?: { code: string; message: string; at: number };
+  engineErrors?: { engine: string; code: string; message: string }[];
   createdAt: number;
   updatedAt: number;
 }

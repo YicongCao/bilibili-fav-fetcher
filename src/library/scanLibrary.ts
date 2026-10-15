@@ -36,6 +36,8 @@ export interface LibraryItem {
 export interface LibraryData {
   schema: 'bili-dl/library@1';
   generatedAt: number;
+  /** outputs 根目录（媒体库页面「复制路径」用） */
+  root?: string;
   folders: string[];
   ups: { mid: number; name: string; count: number }[];
   items: LibraryItem[];
@@ -51,7 +53,7 @@ export async function scanLibrary(root: string): Promise<LibraryData> {
 
   if (!index) {
     log.warn('未找到 index.json，媒体库为空（请先 bili scan）');
-    return { schema: 'bili-dl/library@1', generatedAt: Date.now(), folders: [], ups: [], items: [] };
+    return { schema: 'bili-dl/library@1', generatedAt: Date.now(), root, folders: [], ups: [], items: [] };
   }
 
   for (const video of index.videos) {
@@ -108,6 +110,7 @@ export async function scanLibrary(root: string): Promise<LibraryData> {
   return {
     schema: 'bili-dl/library@1',
     generatedAt: Date.now(),
+    root,
     folders: [...folders].filter(Boolean).sort(),
     ups: [...ups.values()].sort((a, b) => b.count - a.count),
     items,

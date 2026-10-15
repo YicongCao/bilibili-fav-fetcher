@@ -1,4 +1,6 @@
-/** 媒体库索引页（iOS 风格：毛玻璃顶栏 + 大圆角卡片 + 底部抽屉播放器；数据仍用 <script src="library.js"> 注入，兼容 file://） */
+/** 媒体库索引页（iOS 风格；数据用 <script src="library.js"> 注入，兼容 file://）
+ *  功能：两级筛选树、网格/列表视图、排序、删除（保留 metadata 并标记）、底部抽屉播放器、
+ *  滚动分页（1000+ 条不卡）、file:// 提示 */
 export function renderLibraryPage(): string {
   return `<!doctype html>
 <html lang="zh-CN">
@@ -9,7 +11,7 @@ export function renderLibraryPage(): string {
 <style>
   :root {
     color-scheme: dark;
-    --bg:#000; --surface:rgba(28,28,30,.72); --surface-solid:#1c1c1e; --surface-2:#2c2c2e; --surface-3:#3a3a3c;
+    --bg:#000; --surface:rgba(28,28,30,.72); --surface-2:#2c2c2e; --surface-3:#3a3a3c;
     --sep:rgba(84,84,88,.55);
     --label:#fff; --label-2:rgba(235,235,245,.62); --label-3:rgba(235,235,245,.34);
     --blue:#0a84ff; --orange:#ff9f0a; --green:#30d158;
@@ -25,36 +27,48 @@ export function renderLibraryPage(): string {
     font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","PingFang SC",sans-serif;
     -webkit-font-smoothing:antialiased;
   }
-  /* ---------- 毛玻璃顶栏 ---------- */
   header {
     position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-    padding:14px 22px;
-    background:rgba(12,12,14,.72);
+    padding:14px 22px; background:rgba(12,12,14,.72);
     backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px);
     border-bottom:1px solid var(--sep);
   }
-  h1 { font-size:17px; margin:0; font-weight:600; letter-spacing:.01em; }
+  h1 { font-size:17px; margin:0; font-weight:600; }
   .count { color:var(--label-2); font-size:12px; }
   .spacer { flex:1; }
+  input, select, button { font:inherit; font-size:13px; color:var(--label); }
   input, select {
-    font:inherit; font-size:13px; color:var(--label);
     background:var(--surface-2); border:1px solid var(--sep); border-radius:999px; padding:7px 14px;
     transition:border-color .18s var(--ease);
   }
-  #q { min-width:240px; flex:0 1 320px; }
+  #q { min-width:220px; flex:0 1 300px; }
   input:focus, select:focus { outline:none; border-color:var(--blue); }
-  select { border-radius:999px; padding:7px 12px; }
   ::placeholder { color:var(--label-3); }
-  button { font:inherit; font-size:13px; color:var(--label); background:var(--surface-2);
-    border:1px solid transparent; border-radius:999px; padding:7px 14px; cursor:pointer;
+  button { background:var(--surface-2); border:1px solid transparent; border-radius:999px; padding:7px 14px; cursor:pointer;
     transition:transform .18s var(--ease), background .18s var(--ease); }
   button:active { transform:scale(.96); }
   button:hover { background:var(--surface-3); }
   button.filled { background:var(--blue); color:#fff; }
-  button.tiny { padding:4px 10px; font-size:12px; }
   button.filled:hover { background:#3d9bff; }
-  /* ---------- 网格卡片 ---------- */
-  main { padding:18px 22px 32px; display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
+  button.tiny { padding:4px 10px; font-size:12px; }
+  /* ---------- 布局：侧栏筛选树 + 内容 ---------- */
+  .wrap { display:grid; grid-template-columns:216px minmax(0,1fr); gap:18px; padding:18px 22px 32px; align-items:start; }
+  .side { position:sticky; top:74px; }
+  .tree { background:var(--surface); border:1px solid var(--sep); border-radius:var(--r-md); padding:8px;
+    backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); }
+  .tree h3 { font-size:11px; color:var(--label-3); font-weight:500; padding:6px 8px; }
+  .node {
+    display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:9px; font-size:13px;
+    color:var(--label-2); cursor:pointer; transition:background .16s var(--ease), color .16s var(--ease);
+  }
+  .node:hover { background:rgba(255,255,255,.06); color:var(--label); }
+  .node.on { background:var(--blue); color:#fff; }
+  .node .n { margin-left:auto; font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
+  .node.on .n { color:rgba(255,255,255,.85); }
+  .node.sub { padding-left:20px; font-size:12px; }
+  main { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px; align-content:start; }
+  main.list { grid-template-columns:1fr; gap:10px; }
+  /* ---------- 卡片 ---------- */
   .card {
     background:var(--surface); border:1px solid var(--sep); border-radius:var(--r-lg); overflow:hidden;
     cursor:pointer; display:flex; flex-direction:column;
@@ -66,17 +80,18 @@ export function renderLibraryPage(): string {
   .thumb { position:relative; aspect-ratio:16/9; background:#0b0b0d center/cover no-repeat; }
   .thumb .dur { position:absolute; right:8px; bottom:8px; background:rgba(0,0,0,.66); backdrop-filter:blur(6px);
     border-radius:999px; padding:2px 8px; font-size:11px; font-variant-numeric:tabular-nums; }
-  .thumb .badges { position:absolute; left:8px; top:8px; display:flex; gap:5px; }
+  .thumb .badges { position:absolute; left:8px; top:8px; display:flex; gap:5px; flex-wrap:wrap; }
   .badge { background:rgba(0,0,0,.6); backdrop-filter:blur(6px); border-radius:999px; font-size:11px; padding:2px 8px; }
   .badge.hdr { background:rgba(255,159,10,.9); color:#221600; font-weight:600; }
+  .badge.missing { background:rgba(255,69,58,.9); color:#fff; }
   .meta { padding:10px 12px 12px; }
   .title { font-size:13px; line-height:1.4; height:2.8em; overflow:hidden; }
   .sub { color:var(--label-3); font-size:12px; margin-top:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .empty { color:var(--label-2); padding:60px 0; text-align:center; grid-column:1/-1; }
-  /* ---------- 列表视图 ---------- */
-  main.list { grid-template-columns:1fr; gap:10px; }
+  .card.deleted, .row.deleted, .card.missing, .row.missing { opacity:.6; }
+  .card.missing:hover, .row.missing:hover { opacity:.85; }
+  /* ---------- 列表行 ---------- */
   .row {
-    display:grid; grid-template-columns:112px minmax(0,1fr) 130px 90px 104px auto; gap:14px; align-items:center;
+    display:grid; grid-template-columns:112px minmax(0,1fr) 110px 84px 96px auto; gap:14px; align-items:center;
     background:var(--surface); border:1px solid var(--sep); border-radius:var(--r-md); padding:8px 12px 8px 8px;
     backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%);
     cursor:pointer; transition:transform .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
@@ -88,10 +103,28 @@ export function renderLibraryPage(): string {
   .row .r-sub { color:var(--label-3); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .row .r-cell { font-size:12px; color:var(--label-2); font-variant-numeric:tabular-nums; }
   .row .r-acts { display:flex; gap:6px; }
-  .row .r-acts button { padding:4px 10px; font-size:12px; background:var(--surface-2); }
-  .card.deleted, .row.deleted { opacity:.55; }
-  .tag-del { background:rgba(255,69,58,.2); color:#ff8b84; border-radius:999px; font-size:11px; padding:2px 8px; }
-  /* ---------- 分段控件 ---------- */
+  .empty { color:var(--label-2); padding:60px 0; text-align:center; grid-column:1/-1; }
+  /* ---------- 播放器抽屉 ---------- */
+  dialog { border:0; padding:0; background:transparent; width:min(1000px,94vw); max-width:none; }
+  dialog::backdrop { background:rgba(0,0,0,.6); backdrop-filter:blur(3px); }
+  .sheet {
+    background:rgba(28,28,30,.92); backdrop-filter:blur(24px) saturate(180%);
+    border:1px solid var(--sep); border-radius:var(--r-lg); overflow:hidden;
+    box-shadow:0 24px 70px rgba(0,0,0,.6); animation:sheetIn .28s var(--ease);
+  }
+  @keyframes sheetIn { from { transform:translateY(24px) scale(.98); opacity:0; } to { transform:none; opacity:1; } }
+  .player { padding:14px 14px 0; }
+  video { width:100%; background:#000; border-radius:var(--r-md); max-height:60vh; display:block; }
+  .pmeta { padding:12px 18px 16px; }
+  .pmeta .t { font-size:15px; font-weight:600; line-height:1.35; }
+  .pmeta .s { color:var(--label-2); font-size:12px; margin-top:5px; }
+  .pmeta a { color:#8fc6ff; text-decoration:none; }
+  .parts { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .parts button { background:var(--surface-2); color:var(--label-2); font-size:12px; padding:5px 12px; }
+  .parts button.on { background:var(--blue); color:#fff; }
+  .sheet-acts { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+  .grabber { width:38px; height:5px; border-radius:999px; background:var(--surface-3); margin:8px auto 0; }
+  /* ---------- 分段控件 / Toast / 确认框 / 提示条 ---------- */
   .seg { display:flex; background:var(--surface-2); border-radius:11px; padding:2px; gap:2px; }
   .seg button { flex:1; background:transparent; border:0; border-radius:9px; padding:6px 12px; font-size:13px; color:var(--label-2); }
   .seg button.active { background:var(--surface-3); color:var(--label); box-shadow:0 1px 3px rgba(0,0,0,.3); }
@@ -105,7 +138,8 @@ export function renderLibraryPage(): string {
   #toast.show { opacity:1; transform:translate(-50%,0); }
   #sheet { border:0; padding:0; background:transparent; max-width:400px; width:92vw; }
   #sheet::backdrop { background:rgba(0,0,0,.55); }
-  .alert { background:rgba(44,44,46,.92); backdrop-filter:blur(24px); border-radius:var(--r-lg); border:1px solid var(--sep); overflow:hidden; text-align:center; animation:pop .22s var(--ease); }
+  .alert { background:rgba(44,44,46,.92); backdrop-filter:blur(24px); border-radius:var(--r-lg); border:1px solid var(--sep);
+    overflow:hidden; text-align:center; animation:pop .22s var(--ease); }
   @keyframes pop { from { transform:scale(.94); opacity:0; } to { transform:scale(1); opacity:1; } }
   .alert .body { padding:20px 20px 14px; }
   .alert .title { font-size:15px; font-weight:600; }
@@ -113,27 +147,10 @@ export function renderLibraryPage(): string {
   .alert .acts { display:flex; border-top:1px solid var(--sep); }
   .alert .acts button { flex:1; border-radius:0; background:transparent; border:0; padding:12px; font-size:15px; color:#8fc6ff; }
   .alert .acts button + button { border-left:1px solid var(--sep); color:var(--label); font-weight:600; }
-  /* ---------- 底部抽屉播放器（iOS sheet） ---------- */
-  dialog { border:0; padding:0; background:transparent; width:min(1000px,94vw); max-width:none; }
-  dialog::backdrop { background:rgba(0,0,0,.6); backdrop-filter:blur(3px); }
-  .sheet {
-    background:rgba(28,28,30,.92); backdrop-filter:blur(24px) saturate(180%);
-    border:1px solid var(--sep); border-radius:var(--r-lg); overflow:hidden;
-    box-shadow:0 24px 70px rgba(0,0,0,.6);
-    animation:sheetIn .28s var(--ease);
-  }
-  @keyframes sheetIn { from { transform:translateY(24px) scale(.98); opacity:0; } to { transform:none; opacity:1; } }
-  .player { padding:14px 14px 0; }
-  video { width:100%; background:#000; border-radius:var(--r-md); max-height:64vh; display:block; }
-  .pmeta { padding:12px 18px 16px; position:relative; }
-  .pmeta .t { font-size:15px; font-weight:600; line-height:1.35; }
-  .pmeta .s { color:var(--label-2); font-size:12px; margin-top:5px; }
-  .pmeta a { color:#8fc6ff; text-decoration:none; }
-  .parts { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-  .parts button { background:var(--surface-2); color:var(--label-2); font-size:12px; padding:5px 12px; }
-  .parts button.on { background:var(--blue); color:#fff; }
-  .sheet-acts { display:flex; gap:8px; margin-top:14px; }
-  .grabber { width:38px; height:5px; border-radius:999px; background:var(--surface-3); margin:8px auto 0; }
+  #filehint { display:none; background:rgba(255,159,10,.14); border-bottom:1px solid rgba(255,159,10,.3);
+    color:#ffd08a; font-size:12px; padding:8px 22px; }
+  #morespace { grid-column:1/-1; text-align:center; color:var(--label-3); font-size:12px; padding:14px 0; }
+  @media (max-width: 900px) { .wrap { grid-template-columns:1fr; } .side { position:static; } }
 </style>
 </head>
 <body>
@@ -142,8 +159,6 @@ export function renderLibraryPage(): string {
   <span class="count" id="count"></span>
   <span class="spacer"></span>
   <input id="q" placeholder="搜索标题 / UP / BV号" />
-  <select id="folder"><option value="">全部收藏夹</option></select>
-  <select id="up"><option value="">全部 UP</option></select>
   <select id="sort">
     <option value="favTime">按收藏时间</option>
     <option value="pubDate">按发布时间</option>
@@ -157,28 +172,37 @@ export function renderLibraryPage(): string {
   </div>
   <button id="toggle-deleted">显示已删除</button>
 </header>
-<main id="grid"></main>
+<div id="filehint">file:// 模式下无法拖动进度条、也无法删除视频 —— 运行 <b>bili serve</b> 或控制端打开 /library 获得完整体验。</div>
 
-<div id="toast"></div>
-<dialog id="sheet"><div class="alert">
-  <div class="body"><div class="title" id="sheet-title"></div><div class="msg" id="sheet-msg"></div></div>
-  <div class="acts"><button id="sheet-cancel">取消</button><button id="sheet-ok">删除</button></div>
-</div></dialog>
+<div class="wrap">
+  <aside class="side"><div class="tree" id="tree"></div></aside>
+  <main id="grid"></main>
+</div>
 
 <dialog id="dlg"><div class="sheet">
   <div class="grabber"></div>
-  <div class="player">
-    <video id="video" controls preload="metadata"></video>
-  </div>
+  <div class="player"><video id="video" controls preload="metadata"></video></div>
   <div class="pmeta">
     <div class="t" id="p-title"></div>
     <div class="s" id="p-sub"></div>
     <div class="parts" id="p-parts"></div>
     <div class="sheet-acts">
       <button id="p-open" class="filled">打开 B 站原页面</button>
+      <button id="p-copy">复制路径</button>
+      <button id="p-pip">画中画</button>
+      <select id="p-rate" style="width:96px">
+        <option value="0.5">0.5×</option><option value="1" selected>1.0×</option>
+        <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2.0×</option>
+      </select>
       <button id="p-close">关闭 (Esc)</button>
     </div>
   </div>
+</div></dialog>
+
+<div id="toast"></div>
+<dialog id="sheet"><div class="alert">
+  <div class="body"><div class="title" id="sheet-title"></div><div class="msg" id="sheet-msg"></div></div>
+  <div class="acts"><button id="sheet-cancel">取消</button><button id="sheet-ok">删除</button></div>
 </div></dialog>
 
 <script src="library.js"></script>
@@ -187,16 +211,20 @@ let DATA = window.__BILI_LIBRARY__ || { items: [], folders: [], ups: [] };
 const grid = document.getElementById('grid');
 const dlg = document.getElementById('dlg');
 const video = document.getElementById('video');
+const canManage = location.protocol !== 'file:';
+const PAGE = 60;
 let current = null;
+let view = localStorage.getItem('bili-lib-view') || 'grid';
+let showDeleted = false;
+let page = 1;
+let selFolder = '';
+let selUp = '';
 
 const fmtDur = (s) => { const m = Math.floor(s/60), ss = Math.floor(s%60); const h = Math.floor(m/60); return h ? h+':'+String(m%60).padStart(2,'0')+':'+String(ss).padStart(2,'0') : m+':'+String(ss).padStart(2,'0'); };
 const fmtSize = (n) => !n ? '-' : n >= 1073741824 ? (n/1073741824).toFixed(2)+' GB' : (n/1048576).toFixed(0)+' MB';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const idOf = (it) => it.bvid + ':' + it.page;
-const canManage = location.protocol !== 'file:';   // 删除/恢复需要后端，file:// 下隐藏入口
-
-let view = localStorage.getItem('bili-lib-view') || 'grid';
-let showDeleted = false;
+const isMissing = (it) => !it.deleted && !it.size;
 
 let toastTimer = null;
 function toast(text) {
@@ -207,34 +235,50 @@ function toast(text) {
 }
 function confirmSheet(title, msg, okText) {
   return new Promise((resolve) => {
-    const dlg = document.getElementById('sheet');
+    const box = document.getElementById('sheet');
     document.getElementById('sheet-title').textContent = title;
     document.getElementById('sheet-msg').textContent = msg;
     document.getElementById('sheet-ok').textContent = okText || '确定';
     const ok = document.getElementById('sheet-ok'), cancel = document.getElementById('sheet-cancel');
-    const done = (v) => { dlg.close(); ok.onclick = cancel.onclick = null; resolve(v); };
+    const done = (v) => { box.close(); ok.onclick = cancel.onclick = null; resolve(v); };
     ok.onclick = () => done(true); cancel.onclick = () => done(false);
-    dlg.showModal();
+    box.showModal();
   });
 }
 
-for (const f of DATA.folders) { const o = document.createElement('option'); o.value = f; o.textContent = f; document.getElementById('folder').appendChild(o); }
-for (const u of DATA.ups) { const o = document.createElement('option'); o.value = String(u.mid); o.textContent = u.name + '（' + u.count + '）'; document.getElementById('up').appendChild(o); }
+if (!canManage) document.getElementById('filehint').style.display = 'block';
 
-function setView(v) {
-  view = v;
-  localStorage.setItem('bili-lib-view', v);
-  grid.className = v === 'list' ? 'list' : '';
-  document.getElementById('view-grid').className = v === 'grid' ? 'active' : '';
-  document.getElementById('view-list').className = v === 'list' ? 'active' : '';
-  render();
+/** 两级筛选树：收藏夹 → 该收藏夹下的 UP */
+function renderTree() {
+  const base = DATA.items.filter(it => showDeleted || !it.deleted);
+  let html = '<h3>收藏夹</h3>';
+  html += '<div class="node ' + (selFolder === '' && selUp === '' ? 'on' : '') + '" data-folder="" data-up="">全部<span class="n">' + base.length + '</span></div>';
+  for (const f of DATA.folders) {
+    const n = base.filter(it => it.folder === f).length;
+    if (!n) continue;
+    html += '<div class="node ' + (selFolder === f && !selUp ? 'on' : '') + '" data-folder="' + esc(f) + '" data-up="">' + esc(f) + '<span class="n">' + n + '</span></div>';
+    if (selFolder === f) {
+      const ups = new Map();
+      for (const it of base.filter(x => x.folder === f)) ups.set(it.up.mid, (ups.get(it.up.mid) || 0) + 1);
+      for (const [mid, cnt] of [...ups.entries()].sort((a, b) => b[1] - a[1])) {
+        const name = base.find(x => x.up.mid === mid).up.name;
+        html += '<div class="node sub ' + (selUp === String(mid) ? 'on' : '') + '" data-folder="' + esc(f) + '" data-up="' + mid + '">' + esc(name) + '<span class="n">' + cnt + '</span></div>';
+      }
+    }
+  }
+  document.getElementById('tree').innerHTML = html;
+  document.getElementById('tree').querySelectorAll('.node').forEach(n => {
+    n.onclick = () => {
+      selFolder = n.dataset.folder || '';
+      selUp = n.dataset.up || '';
+      page = 1; renderTree(); render();
+    };
+  });
 }
 
-/** 删除后重新拉取 library.json，避免整页刷新 */
 async function refreshData() {
   try {
-    const res = await fetch('library.json?t=' + Date.now());
-    DATA = await res.json();
+    DATA = await (await fetch('library.json?t=' + Date.now())).json();
   } catch {
     location.reload();
   }
@@ -249,7 +293,7 @@ async function removeItem(id) {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [id] }),
   })).json();
   toast(res.ok ? '已删除，释放 ' + fmtSize(res.bytes) : ('删除失败：' + (res.error || '')));
-  await refreshData(); render();
+  await refreshData(); renderTree(); render();
 }
 
 async function restoreItem(id) {
@@ -257,38 +301,52 @@ async function restoreItem(id) {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [id] }),
   })).json();
   toast(res.ok ? '已恢复，下次扫描可重新下载' : ('恢复失败：' + (res.error || '')));
-  await refreshData(); render();
+  await refreshData(); renderTree(); render();
 }
 
-function render() {
-  const q = document.getElementById('q').value.trim().toLowerCase();
-  const folder = document.getElementById('folder').value;
-  const up = document.getElementById('up').value;
-  const sort = document.getElementById('sort').value;
+function setView(v) {
+  view = v;
+  localStorage.setItem('bili-lib-view', v);
+  grid.className = v === 'list' ? 'list' : '';
+  document.getElementById('view-grid').className = v === 'grid' ? 'active' : '';
+  document.getElementById('view-list').className = v === 'list' ? 'active' : '';
+  page = 1; render();
+}
 
+function filtered() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const sort = document.getElementById('sort').value;
   let list = DATA.items.filter(it => {
     if (!showDeleted && it.deleted) return false;
-    if (folder && it.folder !== folder) return false;
-    if (up && String(it.up.mid) !== up) return false;
+    if (selFolder && it.folder !== selFolder) return false;
+    if (selUp && String(it.up.mid) !== selUp) return false;
     if (q && !(it.title + ' ' + it.up.name + ' ' + it.bvid).toLowerCase().includes(q)) return false;
     return true;
   });
-  list.sort((a,b) => {
-    if (sort === 'title') return a.title.localeCompare(b.title, 'zh');
-    // size / duration / favTime / pubDate 一律「从大到小、从新到旧」
-    return (b[sort] || 0) - (a[sort] || 0);
-  });
+  list.sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh') : (b[sort] || 0) - (a[sort] || 0));
+  return list;
+}
 
+function render() {
+  const list = filtered();
+  const shown = list.slice(0, page * PAGE);
   const deletedCount = DATA.items.filter(it => it.deleted).length;
-  document.getElementById('count').textContent = list.length + ' 个视频' + (deletedCount ? '（已删除 ' + deletedCount + '）' : '');
+  const missingCount = DATA.items.filter(isMissing).length;
+  document.getElementById('count').textContent =
+    list.length + ' 个视频' + (deletedCount ? '（已删除 ' + deletedCount + '）' : '') + (missingCount ? '（缺失 ' + missingCount + '）' : '');
   if (!list.length) { grid.innerHTML = '<div class="empty">没有匹配的视频</div>'; return; }
 
-  if (view === 'list') {
-    grid.innerHTML = list.map(it => \`
-      <div class="row \${it.deleted?'deleted':''}" data-id="\${it.bvid}" data-page="\${it.page}">
+  const badge = (it) =>
+    (it.qualityLabel ? '<span class="badge">' + esc(it.qualityLabel) + '</span>' : '') +
+    (it.hdr ? '<span class="badge hdr">HDR</span>' : '') +
+    (it.deleted ? '<span class="badge missing">已删除</span>' : isMissing(it) ? '<span class="badge missing">文件缺失</span>' : '');
+
+  const html = view === 'list'
+    ? shown.map(it => \`
+      <div class="row \${it.deleted?'deleted':''} \${isMissing(it)?'missing':''}" data-id="\${it.bvid}" data-page="\${it.page}">
         <div class="rt" style="background-image:url('\${encodeURI(it.poster || '')}')"><span class="dur">\${fmtDur(it.duration)}</span></div>
         <div>
-          <div class="r-title" title="\${esc(it.title)}">\${esc(it.title)}\${it.page>1?' P'+it.page:''} \${it.deleted?'<span class="tag-del">已删除</span>':''}</div>
+          <div class="r-title" title="\${esc(it.title)}">\${esc(it.title)}\${it.page>1?' P'+it.page:''} \${it.deleted?'<span class="badge missing">已删除</span>':isMissing(it)?'<span class="badge missing">缺失</span>':''}</div>
           <div class="r-sub">\${esc(it.up.name)} · \${esc(it.folder||'')}</div>
         </div>
         <div class="r-cell">\${fmtSize(it.size)}</div>
@@ -296,32 +354,36 @@ function render() {
         <div class="r-cell">\${it.qualityLabel ? '<span class="badge">'+esc(it.qualityLabel)+'</span>' : ''}\${it.hdr?'<span class="badge hdr">HDR</span>':''}</div>
         <div class="r-acts">
           \${canManage ? (it.deleted
-            ? '<button data-act="restore" data-key="'+idOf(it)+'">恢复</button>'
-            : '<button data-act="del" data-key="'+idOf(it)+'">删除</button>') : ''}
+            ? '<button class="tiny" data-act="restore" data-key="'+idOf(it)+'">恢复</button>'
+            : '<button class="tiny" data-act="del" data-key="'+idOf(it)+'">删除</button>') : ''}
+        </div>
+      </div>\`).join('')
+    : shown.map(it => \`
+      <div class="card \${it.deleted?'deleted':''} \${isMissing(it)?'missing':''}" data-id="\${it.bvid}" data-page="\${it.page}">
+        <div class="thumb" style="background-image:url('\${encodeURI(it.poster || '')}')">
+          <div class="badges">\${badge(it)}</div>
+          <div class="dur">\${fmtDur(it.duration)}</div>
+        </div>
+        <div class="meta">
+          <div class="title" title="\${esc(it.title)}">\${esc(it.title)}\${it.page>1?' P'+it.page:''}</div>
+          <div class="sub">\${esc(it.up.name)} · \${esc(it.folder||'')} · \${fmtSize(it.size)}</div>
+          \${canManage ? '<div class="sub" style="margin-top:8px">' + (it.deleted
+            ? '<button class="tiny" data-act="restore" data-key="'+idOf(it)+'">恢复（可重新下载）</button>'
+            : '<button class="tiny" data-act="del" data-key="'+idOf(it)+'">删除</button>') + '</div>' : ''}
         </div>
       </div>\`).join('');
-    return;
-  }
 
-  grid.innerHTML = list.map(it => \`
-    <div class="card \${it.deleted?'deleted':''}" data-id="\${it.bvid}" data-page="\${it.page}">
-      <div class="thumb" style="background-image:url('\${encodeURI(it.poster || '')}')">
-        <div class="badges">
-          \${it.qualityLabel ? '<span class="badge">'+esc(it.qualityLabel)+'</span>' : ''}
-          \${it.hdr ? '<span class="badge hdr">HDR</span>' : ''}
-          \${it.deleted ? '<span class="badge" style="background:rgba(255,69,58,.9);color:#fff">已删除</span>' : ''}
-        </div>
-        <div class="dur">\${fmtDur(it.duration)}</div>
-      </div>
-      <div class="meta">
-        <div class="title" title="\${esc(it.title)}">\${esc(it.title)}\${it.page>1?' P'+it.page:''}</div>
-        <div class="sub">\${esc(it.up.name)} · \${esc(it.folder||'')} · \${fmtSize(it.size)}</div>
-        \${canManage ? '<div class="sub" style="margin-top:8px">' + (it.deleted
-          ? '<button class="tiny" data-act="restore" data-key="'+idOf(it)+'">恢复（可重新下载）</button>'
-          : '<button class="tiny" data-act="del" data-key="'+idOf(it)+'">删除</button>') + '</div>' : ''}
-      </div>
-    </div>\`).join('');
+  grid.innerHTML = html + (list.length > shown.length
+    ? '<div id="morespace">已显示 ' + shown.length + ' / ' + list.length + '，继续下滑加载更多</div>' : '');
 }
+
+// 滚动分页：接近底部时再加载一页，避免 1000+ 条一次性渲染
+window.addEventListener('scroll', () => {
+  if (window.innerHeight + window.scrollY < document.body.offsetHeight - 400) return;
+  const list = filtered();
+  if (page * PAGE >= list.length) return;
+  page += 1; render();
+});
 
 grid.addEventListener('click', (e) => {
   const actBtn = e.target.closest('button[data-act]');
@@ -332,10 +394,10 @@ grid.addEventListener('click', (e) => {
     return;
   }
   const card = e.target.closest('.card, .row'); if (!card) return;
-  const page = Number(card.dataset.page || 1);
-  const group = DATA.items.filter(it => it.bvid === card.dataset.id).sort((a,b)=>a.page-b.page);
+  const pageNo = Number(card.dataset.page || 1);
+  const group = DATA.items.filter(it => it.bvid === card.dataset.id).sort((a, b) => a.page - b.page);
   if (!group.length) return;
-  play(group.find(g => g.page === page) || group[0], group);
+  play(group.find(g => g.page === pageNo) || group[0], group);
 });
 
 function play(item, group) {
@@ -355,8 +417,8 @@ function play(item, group) {
   document.getElementById('p-parts').innerHTML = group.map(g => \`<button data-page="\${g.page}" class="\${g.page===item.page?'on':''}">P\${g.page}\${g.partTitle?' '+esc(g.partTitle):''}</button>\`).join('');
   document.getElementById('p-parts').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    const page = Number(b.dataset.page);
-    play(group.find(g => g.page === page) || group[0], group);
+    const p = Number(b.dataset.page);
+    play(group.find(g => g.page === p) || group[0], group);
   };
   if (!dlg.open) dlg.showModal();
   video.play().catch(() => {});
@@ -365,19 +427,28 @@ function play(item, group) {
 document.getElementById('p-open').onclick = () => { if (current) window.open('https://www.bilibili.com/video/' + current.bvid, '_blank'); };
 document.getElementById('p-close').onclick = () => { dlg.close(); video.pause(); };
 dlg.addEventListener('close', () => video.pause());
-document.getElementById('q').oninput = render;
-document.getElementById('folder').onchange = render;
-document.getElementById('up').onchange = render;
-document.getElementById('sort').onchange = render;
+document.getElementById('p-rate').onchange = (e) => { video.playbackRate = Number(e.target.value); };
+document.getElementById('p-pip').onclick = async () => {
+  try {
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else await video.requestPictureInPicture();
+  } catch { toast('当前浏览器不支持画中画'); }
+};
+document.getElementById('p-copy').onclick = async () => {
+  if (!current) return;
+  const text = (DATA.root ? DATA.root + '/' : '') + current.video;
+  try { await navigator.clipboard.writeText(text); toast('已复制路径：' + text); }
+  catch { toast('复制失败，路径：' + text); }
+};
+document.getElementById('q').oninput = () => { page = 1; render(); };
+document.getElementById('sort').onchange = () => { page = 1; render(); };
 document.getElementById('view-grid').onclick = () => setView('grid');
 document.getElementById('view-list').onclick = () => setView('list');
 document.getElementById('toggle-deleted').onclick = () => {
   showDeleted = !showDeleted;
   document.getElementById('toggle-deleted').textContent = showDeleted ? '隐藏已删除' : '显示已删除';
-  render();
+  page = 1; renderTree(); render();
 };
-if (!canManage) document.getElementById('toggle-deleted').style.display = 'none';
-setView(view);
 document.addEventListener('keydown', (e) => {
   if (!dlg.open) return;
   if (e.key === 'Escape') { e.preventDefault(); dlg.close(); }
@@ -385,7 +456,8 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowRight') video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
   else if (e.key === 'ArrowLeft') video.currentTime = Math.max(0, video.currentTime - 5);
 });
-render();
+renderTree();
+setView(view);
 </script>
 </body>
 </html>`;

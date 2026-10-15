@@ -7,6 +7,7 @@ import { scanCommand } from './commands/scan.js';
 import { downloadCommand } from './commands/download.js';
 import { statusCommand } from './commands/status.js';
 import { repairCommand } from './commands/repair.js';
+import { upCommand } from './commands/up.js';
 import { log } from '../utils/logger.js';
 
 const program = new Command();
@@ -60,6 +61,25 @@ program
       pages: opts.pages,
       dryRun: opts.dryRun,
       force: opts.force,
+      cookieFile: opts.cookieFile,
+    });
+  });
+
+program
+  .command('up')
+  .argument('<target>', 'UP 主 mid / 主页 URL / 昵称')
+  .description('按 UP 主从新到旧下载全部投稿')
+  .option('--since <date>', '只下载该日期之后发布的投稿（YYYY-MM-DD）')
+  .option('--keyword <kw>', '标题关键词过滤')
+  .option('--limit <n>', '只处理前 n 个任务')
+  .option('--dry-run', '只列出任务')
+  .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
+  .action(async (target, opts) => {
+    await upCommand(target, {
+      since: opts.since,
+      keyword: opts.keyword,
+      limit: opts.limit ? Number(opts.limit) : undefined,
+      dryRun: opts.dryRun,
       cookieFile: opts.cookieFile,
     });
   });

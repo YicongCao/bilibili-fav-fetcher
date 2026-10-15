@@ -20,6 +20,8 @@ export interface WebOptions {
   limit?: number;
   noDownload?: boolean;
   cookieFile?: string;
+  /** 启动即暂停队列（不自动开跑） */
+  paused?: boolean;
 }
 
 export async function webCommand(options: WebOptions = {}): Promise<void> {
@@ -39,7 +41,15 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
   taskStore.startAutoFlush();
   taskStore.recover();
   const queue = await DownloadQueue.load(config.output.root, taskStore);
-  queue.resume();
+  // 尊重上次退出时的队列状态：上次是暂停就保持暂停，不再自动抓几个任务跑起来
+  // （pause 只挡「取新任务」，一旦启动就会先把 N 个在飞任务跑完，看起来像没暂停）
+  const startPaused = options.paused === true || queue.status === 'paused';
+  if (startPaused) {
+    queue.pause();
+    log.print('队列保持暂停，未在后台开始下载 —— 管理端点「继续下载」才开始');
+  } else {
+    queue.resume();
+  }
 
   if (!options.noDownload) {
     const index = await readJson<IndexFile>(`${config.output.root}/index.json`);

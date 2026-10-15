@@ -112,6 +112,7 @@ program
   .option('--no-open', '不自动打开浏览器')
   .option('--limit <n>', '只规划前 n 个任务')
   .option('--no-download', '只开看板，不启动下载')
+  .option('--paused', '启动即暂停队列（默认沿用上次退出时的状态）')
   .option('--out <dir>', OUT_DESC, outArg)
   .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
   .action(async (opts) => {

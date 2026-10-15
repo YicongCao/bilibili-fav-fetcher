@@ -207,7 +207,8 @@ export class DownloadQueue {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    this.state.status = 'stopped';
+    // 不要把「用户暂停」覆盖成 stopped，否则下次启动会误判成要开跑
+    if (this.state.status !== 'paused') this.state.status = 'stopped';
     void this.flush(true);
   }
 }

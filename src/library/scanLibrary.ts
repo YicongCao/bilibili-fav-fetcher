@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
-import { readJson, writeJsonAtomic } from '../utils/fsx.js';
+import { readJson, writeJsonAtomic, writeTextAtomic } from '../utils/fsx.js';
 import { log } from '../utils/logger.js';
 import type { IndexFile } from '../types/index.js';
 
@@ -108,7 +108,8 @@ export async function scanLibrary(root: string): Promise<LibraryData> {
 
 export async function buildLibrary(root: string): Promise<LibraryData> {
   const data = await scanLibrary(root);
-  await writeJsonAtomic(path.join(root, 'library.js'), `window.__BILI_LIBRARY__ = ${JSON.stringify(data)};\n`);
+  // 注意：library.js 是可执行脚本，必须按文本写；writeJsonAtomic 会把整段包成字符串导致页面拿不到数据
+  await writeTextAtomic(path.join(root, 'library.js'), `window.__BILI_LIBRARY__ = ${JSON.stringify(data)};\n`);
   await writeJsonAtomic(path.join(root, 'library.json'), data);
   log.info(`媒体库：${data.items.length} 个视频，${data.folders.length} 个分类，${data.ups.length} 位 UP`);
   return data;

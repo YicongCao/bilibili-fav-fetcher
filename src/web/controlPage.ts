@@ -25,6 +25,8 @@ export function renderControlPage(): string {
   .badge.hdr { background:#3a2a12; color:var(--warn); }
   .badge.ytdlp { background:#2a2136; color:#c39bf5; }
   .stage { font-size:11px; padding:1px 6px; border-radius:4px; background:#22262e; }
+  /* 速度列固定宽 + 等宽数字，避免速度变化时整列跳动 */
+  td.speed, th.speed { width:96px; min-width:96px; white-space:nowrap; font-variant-numeric:tabular-nums; }
   .stage.done { background:#123024; color:var(--ok); }
   .stage.failed { background:#331616; color:var(--err); }
   .stage.downloading { background:#132639; color:var(--accent); }
@@ -108,7 +110,7 @@ export function renderControlPage(): string {
       </select>
     </div>
     <table>
-      <thead><tr><th>任务</th><th>画质</th><th>状态</th><th>进度</th><th>速度</th><th>操作</th></tr></thead>
+      <thead><tr><th>任务</th><th>画质</th><th>状态</th><th>进度</th><th class="speed">速度</th><th>操作</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </section>
@@ -205,7 +207,11 @@ async function loadDashboard() {
   set('d-usage-text', 'outputs 占用 ' + fmtBytes(disk.usedBytes || 0) + (disk.limitBytes ? ' / 上限 ' + fmtBytes(disk.limitBytes) : '（未设上限）') + (disk.cacheBytes ? ' · 缓存 ' + fmtBytes(disk.cacheBytes) : ''));
 
   const dl = document.getElementById('btn-dl');
-  dl.textContent = (d.queue && d.queue.status === 'running') ? '暂停下载' : '继续下载';
+  const q = d.queue || {};
+  // paused 但还有在飞任务时如实显示，避免「显示继续下载却还在跑」的观感矛盾
+  dl.textContent = q.status === 'paused'
+    ? (q.inflight > 0 ? '暂停中…（在飞 ' + q.inflight + '）' : '继续下载')
+    : '暂停下载';
   dl.disabled = false;
   const mx = document.getElementById('btn-mux');
   mx.textContent = d.mux && d.mux.paused ? '继续转码' : '暂停转码';
@@ -329,7 +335,7 @@ function render() {
       <td>\${t.quality ? '<span class="badge">'+t.quality+'</span>' : ''}\${t.hdr ? '<span class="badge hdr">HDR</span>' : ''}\${t.fps ? '<span class="badge">'+t.fps+'fps</span>' : ''}<span class="badge \${t.engine==='ytdlp'?'ytdlp':''}">\${t.engine}</span></td>
       <td><span class="stage \${t.stage}">\${t.stage}</span></td>
       <td><div class="bar"><i style="width:\${pct}%"></i></div><div style="font-size:11px;color:var(--muted)">\${pct}%</div></td>
-      <td>\${speed}</td>
+      <td class="speed">\${speed}</td>
       <td><div class="row-actions">
         <button data-act="prioritize" data-id="\${t.id}">插队</button>
         <button data-act="retry" data-id="\${t.id}">重试</button>

@@ -13,6 +13,7 @@ import { expiresInDays } from '../auth/cookie.js';
 import { outputUsage, invalidateUsage } from '../core/disk.js';
 import { cleanAllCache, cleanDoneCache } from '../core/cache.js';
 import { enqueueFavorites, enqueueUp, listFolders, refreshFavorites, type EnqueueCtx } from '../core/enqueue.js';
+import { buildLibrary } from '../library/scanLibrary.js';
 import { isMuxPaused, setMuxPaused } from '../core/muxGate.js';
 import type { TaskStore } from '../core/taskStore.js';
 import type { DownloadQueue } from '../core/queue.js';
@@ -248,6 +249,12 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
       invalidateUsage(ctx.root);
       log.warn(`已清理分片缓存，释放 ${formatBytes(result.bytes)}（${result.removed} 个目录）`);
       json(res, { ok: true, ...result });
+      return;
+    }
+
+    if (route === '/api/library/rebuild' && req.method === 'POST') {
+      const data = await buildLibrary(ctx.root);
+      json(res, { ok: true, items: data.items.length, folders: data.folders.length, ups: data.ups.length });
       return;
     }
 

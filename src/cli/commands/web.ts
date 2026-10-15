@@ -10,7 +10,8 @@ import { runQueue } from '../../core/pipeline.js';
 import { startServer } from '../../server/http.js';
 import { bus, toSummary } from '../../server/events.js';
 import { checkEngines } from '../../core/engines/index.js';
-import type { IndexFile } from '../../types/index.js';
+import { buildLibrary } from '../../library/scanLibrary.js';
+import type { IndexFile, TaskRecord } from '../../types/index.js';
 
 export interface WebOptions {
   port?: number;
@@ -94,12 +95,28 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
 
+  // 媒体库：启动时后台重建一次，之后任务每完成一个防抖重建（几秒内完成，纯 stat 扫描）
+  let libTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleLibraryRebuild = (delayMs = 5000) => {
+    if (libTimer) clearTimeout(libTimer);
+    libTimer = setTimeout(() => {
+      libTimer = null;
+      buildLibrary(config.output.root).catch((err) => log.warn(`媒体库重建失败：${(err as Error).message}`));
+    }, delayMs);
+  };
+  scheduleLibraryRebuild(1500);
+
+  const onTaskUpdate = (task: TaskRecord) => {
+    bus.emit({ t: 'task.update', task: toSummary(task) });
+    if (task.stage === 'done') scheduleLibraryRebuild();
+  };
+
   if (!options.noDownload) {
     log.print(`outputs 目录：${config.output.root}`);
     // 管理端随时可能新增任务（收藏夹 / UP 主），所以取空后再轮询，而不是直接结束
     for (;;) {
       await runQueue({ cookies: store.cookies, store: taskStore, queue }, {
-        onTaskUpdate: (task) => bus.emit({ t: 'task.update', task: toSummary(task) }),
+        onTaskUpdate,
         onOverLimit: (usage) => bus.emit({ t: 'disk.warn', freeGB: usage.freeBytes / 1024 ** 3 }),
       });
       if (stopping) break;

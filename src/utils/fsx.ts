@@ -39,6 +39,15 @@ export async function writeJsonAtomic(file: string, data: unknown): Promise<void
   await fs.rename(tmp, target);
 }
 
+/** 原子写文本（不走 JSON.stringify，用于 library.js 这类「内容即代码」的文件） */
+export async function writeTextAtomic(file: string, text: string): Promise<void> {
+  const target = resolvePath(file);
+  await ensureDir(path.dirname(target));
+  const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  await fs.writeFile(tmp, text, 'utf8');
+  await fs.rename(tmp, target);
+}
+
 export async function chmod600(file: string): Promise<void> {
   try {
     await fs.chmod(resolvePath(file), 0o600);

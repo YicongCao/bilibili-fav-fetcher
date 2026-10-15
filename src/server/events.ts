@@ -21,6 +21,8 @@ export interface TaskSummary {
   engine: string;
   retryCount: number;
   error?: string;
+  cover?: string;
+  updatedAt: number;
 }
 
 export interface QueueSummary {
@@ -49,6 +51,8 @@ export function toSummary(task: TaskRecord): TaskSummary {
     engine: task.engine ?? 'native',
     retryCount: task.retryCount,
     error: task.error?.message,
+    cover: task.cover,
+    updatedAt: task.updatedAt,
   };
 }
 

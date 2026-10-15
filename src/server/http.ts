@@ -149,30 +149,59 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
     if (route === '/api/dashboard') {
       const all = ctx.store.all();
       const active = all.filter((t) => t.stage === 'downloading' || t.stage === 'muxing' || t.stage === 'finalizing');
+      const downloading = all.filter((t) => t.stage === 'downloading');
+      const muxing = all.filter((t) => t.stage === 'muxing' || t.stage === 'finalizing');
       const snapshot = ctx.queue.snapshot();
       const usage = await outputUsage(ctx.root);
       const auth = Date.now() - authCache.checkedAt > 300_000 ? await refreshAuth(ctx) : authCache;
-      const speedBps = all
-        .filter((t) => t.stage === 'downloading')
-        .reduce((sum, t) => sum + (t.progress?.speedBps ?? 0), 0);
+      const speedBps = downloading.reduce((sum, t) => sum + (t.progress?.speedBps ?? 0), 0);
+      // 剩余字节 / 总速度 = 整体 ETA；停滞 = 在下载但长时间没速度
+      const bytesLeft = downloading.reduce(
+        (sum, t) => sum + Math.max(0, (t.progress?.bytesTotal ?? 0) - (t.progress?.bytesDone ?? 0)),
+        0,
+      );
+      const etaSec = speedBps > 0 ? Math.round(bytesLeft / speedBps) : 0;
+      const stalled = downloading.filter(
+        (t) => (t.progress?.speedBps ?? 0) < 8192 && Date.now() - (t.updatedAt ?? 0) > 60_000,
+      ).length;
+      const alerts: { level: 'warn' | 'error'; msg: string }[] = [];
+      if (usage.limitBytes && usage.usedBytes >= usage.limitBytes) {
+        alerts.push({ level: 'error', msg: `outputs 已达上限 ${formatBytes(usage.limitBytes)}，下载已停止` });
+      } else if (usage.freeBytes < config.download.minFreeDiskGB * 1024 ** 3) {
+        alerts.push({ level: 'warn', msg: `磁盘剩余 ${formatBytes(usage.freeBytes)}，低于 ${config.download.minFreeDiskGB}GB 阈值` });
+      }
+      if (!auth.login) alerts.push({ level: 'error', msg: '登录态失效，请重新扫码（bili login）' });
+      if (stalled > 0) alerts.push({ level: 'warn', msg: `${stalled} 个任务疑似停滞（超过 60s 无速度）` });
+      if (isMuxPaused()) alerts.push({ level: 'warn', msg: '转码已暂停，已下载分片会排队等待封装' });
       json(res, {
         root: ctx.root,
         tasks: {
           total: all.length,
           running: active.length,
-          downloading: all.filter((t) => t.stage === 'downloading').length,
+          downloading: downloading.length,
           muxing: all.filter((t) => t.stage === 'muxing').length,
           queued: all.filter((t) => t.stage === 'queued').length,
           done: all.filter((t) => t.stage === 'done').length,
           failed: all.filter((t) => t.stage === 'failed').length,
           remaining: ctx.queue.remaining(),
+          stalled,
         },
         videos: {
           downloaded: all.filter((t) => t.stage === 'done' || t.stage === 'skipped').length,
           bytesDone: snapshot.stats.bytesDone,
         },
         speedBps,
-        queue: { status: snapshot.status, inflight: snapshot.inflight.length, delayed: snapshot.delayed.length },
+        etaSec,
+        alerts,
+        queue: {
+          status: snapshot.status,
+          inflight: snapshot.inflight.length,
+          delayed: snapshot.delayed.length,
+          slots: {
+            download: { used: downloading.length, max: config.download.maxParallelTasks },
+            mux: { used: muxing.length, max: config.mux.maxParallel },
+          },
+        },
         mux: { paused: isMuxPaused() },
         disk: {
           root: usage.root,
@@ -332,6 +361,40 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
       return;
     }
 
+    // 失败清单：json 预览 / csv 下载
+    if (route === '/api/tasks/failed') {
+      const failed = ctx.store.all().filter((t) => t.stage === 'failed');
+      if (url.searchParams.get('format') === 'csv') {
+        const rows = [['bvid', 'page', 'title', 'engine', 'retry', 'error']].concat(
+          failed.map((t) => [
+            t.bvid,
+            String(t.page),
+            t.title.replace(/[\r\n,]/g, ' '),
+            t.engine ?? 'native',
+            String(t.retryCount ?? 0),
+            (t.error?.message ?? '').replace(/[\r\n,]/g, ' '),
+          ]),
+        );
+        const csv = '\uFEFF' + rows.map((r) => r.join(',')).join('\n') + '\n';
+        res.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="failed-${new Date().toISOString().slice(0, 10)}.csv"`,
+        });
+        res.end(csv);
+        return;
+      }
+      json(res, { failed: failed.map(toSummary), total: failed.length });
+      return;
+    }
+
+    // 清空失败队列：把失败任务移出队列（记录保留，可用「重试」再放回）
+    if (route === '/api/queue/clear-failed' && req.method === 'POST') {
+      const failed = ctx.store.all().filter((t) => t.stage === 'failed');
+      for (const t of failed) ctx.queue.cancel(t.id);
+      json(res, { ok: true, cleared: failed.length });
+      return;
+    }
+
     const taskMatch = route.match(/^\/api\/tasks\/([^/]+)\/(\w+)$/);
     if (taskMatch && req.method === 'POST') {
       const [, id, action] = taskMatch;
@@ -350,6 +413,14 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
         ctx.queue.prioritize(id);
       } else if (action === 'prioritize') {
         task.stage = 'queued';
+        ctx.queue.prioritize(id);
+      } else if (action === 'ytdlp') {
+        // 改用副引擎重下：切引擎 + 重置重试 + 插队，原主引擎分片无法复用
+        task.engine = 'ytdlp';
+        task.retryCount = 0;
+        task.error = undefined;
+        task.stage = 'queued';
+        ctx.queue.cancel(id);
         ctx.queue.prioritize(id);
       } else if (action === 'pause') {
         task.stage = 'paused';

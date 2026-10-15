@@ -50,6 +50,16 @@ export function renderControlPage(): string {
   .pill b { color:var(--label); font-weight:600; }
   .pill.running { background:rgba(48,209,88,.16); color:var(--green); border-color:rgba(48,209,88,.35); }
   .pill.paused  { background:rgba(255,159,10,.16); color:var(--orange); border-color:rgba(255,159,10,.35); }
+  .pill.warn    { background:rgba(255,69,58,.16); color:#ff8b84; border-color:rgba(255,69,58,.35); }
+  #alerts { padding:0 22px; }
+  #alerts:not(:empty) { padding-top:12px; }
+  .alertbar {
+    display:flex; align-items:center; gap:10px; margin-bottom:8px;
+    padding:10px 14px; border-radius:var(--r-md); font-size:13px;
+    background:rgba(255,159,10,.14); border:1px solid rgba(255,159,10,.35); color:#ffd08a;
+  }
+  .alertbar.error { background:rgba(255,69,58,.14); border-color:rgba(255,69,58,.4); color:#ff8b84; }
+  .alertbar .x { margin-left:auto; background:transparent; border:0; color:inherit; padding:2px 8px; }
   .spacer { flex:1; }
   /* ---------- 按钮：胶囊三级 ---------- */
   button {
@@ -129,6 +139,8 @@ export function renderControlPage(): string {
   }
   .row:last-child { border-bottom:0; }
   .row:hover { background:rgba(255,255,255,.035); }
+  .tcell { display:flex; align-items:center; gap:10px; min-width:0; }
+  .tcell .thumb { width:56px; height:32px; border-radius:6px; object-fit:cover; background:var(--surface-2); flex:none; }
   .row .name { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .row .err { color:#ff8b84; font-size:11px; margin-top:2px; }
   .cell-num, .speed { font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -206,9 +218,13 @@ export function renderControlPage(): string {
   <span class="pill">完成 <b id="s-done">0</b></span>
   <span class="pill">失败 <b id="s-failed">0</b></span>
   <span class="pill">已下载 <b id="s-bytes">0</b></span>
+  <span class="pill" id="s-slots">下载 0/3 · 转码 0/3</span>
+  <span class="pill" id="s-eta">ETA -</span>
+  <span class="pill warn" id="s-stalled" style="display:none">停滞 <b>0</b></span>
   <span class="spacer"></span>
   <button id="btn-refresh">刷新</button>
 </header>
+<div id="alerts"></div>
 
 <section class="dash">
   <div class="cards">
@@ -225,6 +241,9 @@ export function renderControlPage(): string {
     <button id="btn-mux" class="tinted">暂停转码</button>
     <a href="/library" target="_blank" rel="noreferrer"><button class="tinted">打开媒体库</button></a>
     <button id="btn-clean-cache">清理已完成缓存</button>
+    <button id="btn-build-index">重建媒体库</button>
+    <button id="btn-export-failed">导出失败清单</button>
+    <button id="btn-clear-failed">清空失败队列</button>
     <span class="muted" id="d-root"></span>
   </div>
   <div class="usage">
@@ -307,7 +326,16 @@ export function renderControlPage(): string {
 
     <section class="panel">
       <h2>日志</h2>
-      <div id="logs"></div>
+      <div class="field">
+        <select id="log-level">
+          <option value="">全部级别</option>
+          <option value="INFO">INFO</option>
+          <option value="WARN">WARN</option>
+          <option value="ERROR">ERROR</option>
+        </select>
+        <button id="btn-log-dl">下载</button>
+      </div>
+      <div id="logs" style="margin-top:8px"></div>
     </section>
   </aside>
 </main>
@@ -319,10 +347,27 @@ export function renderControlPage(): string {
 </div></dialog>
 
 <script>
-const state = { tasks: [], stats: {}, dash: null };
+const state = { tasks: [], stats: {}, dash: null, logs: [] };
 const fmtBytes = (n) => { const u=['B','KB','MB','GB','TB']; let v=n||0,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(i?1:0)+' '+u[i]; };
 const fmtSpeed = (bps) => (bps ? (bps/1048576).toFixed(1)+' MB/s' : '0 MB/s');
+const fmtEta = (sec) => {
+  if (!sec || sec < 0) return '-';
+  const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = Math.floor(sec%60);
+  return h ? h+'时'+String(m).padStart(2,'0')+'分' : m+'分'+String(s).padStart(2,'0')+'秒';
+};
 const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+const hiddenAlerts = new Set();
+
+function renderAlerts(alerts) {
+  const box = document.getElementById('alerts');
+  const list = (alerts || []).filter(a => !hiddenAlerts.has(a.msg));
+  box.innerHTML = list.map(a => '<div class="alertbar ' + (a.level === 'error' ? 'error' : '') + '">' +
+    (a.level === 'error' ? '⚠️' : '⚡') + ' ' + escapeHtml(a.msg) +
+    '<button class="x" data-msg="' + escapeHtml(a.msg) + '">✕</button></div>').join('');
+  box.querySelectorAll('.x').forEach(btn => {
+    btn.onclick = () => { hiddenAlerts.add(btn.dataset.msg); renderAlerts(alerts); };
+  });
+}
 
 let toastTimer = null;
 function toast(text) {
@@ -372,6 +417,19 @@ async function loadDashboard() {
   bar.style.width = pct + '%';
   bar.className = disk.limitBytes && disk.usedBytes >= disk.limitBytes ? 'over' : pct >= 90 ? 'near' : '';
   set('d-usage-text', 'outputs 占用 ' + fmtBytes(disk.usedBytes || 0) + (disk.limitBytes ? ' / 上限 ' + fmtBytes(disk.limitBytes) : '（未设上限）') + (disk.cacheBytes ? ' · 缓存 ' + fmtBytes(disk.cacheBytes) : ''));
+
+  // 队列占用 / ETA / 停滞 / 告警
+  const slots = (d.queue && d.queue.slots) || {};
+  set('s-slots', '下载 ' + ((slots.download && slots.download.used) ?? 0) + '/' + ((slots.download && slots.download.max) ?? 3) +
+    ' · 转码 ' + ((slots.mux && slots.mux.used) ?? 0) + '/' + ((slots.mux && slots.mux.max) ?? 3));
+  set('s-eta', 'ETA ' + fmtEta(d.etaSec));
+  const stallPill = document.getElementById('s-stalled');
+  const stalled = (d.tasks && d.tasks.stalled) || 0;
+  stallPill.style.display = stalled ? '' : 'none';
+  stallPill.innerHTML = '停滞 <b>' + stalled + '</b>';
+  renderAlerts(d.alerts);
+  // 大数字卡片：速度卡副标题显示整体 ETA
+  set('d-speed-sub', d.etaSec ? ('预计还需 ' + fmtEta(d.etaSec) + ' · 本次会话累计 ' + fmtBytes(d.videos ? d.videos.bytesDone : 0)) : ('本次会话累计 ' + fmtBytes(d.videos ? d.videos.bytesDone : 0)));
 
   const dl = document.getElementById('btn-dl');
   const q = d.queue || {};
@@ -493,8 +551,14 @@ async function loadStats() {
 async function loadLogs() {
   const res = await fetch('/api/logs/tail');
   const data = await res.json();
+  state.logs = data.lines || [];
+  renderLogs();
+}
+function renderLogs() {
+  const level = document.getElementById('log-level').value;
+  const lines = (state.logs || []).filter((l) => !level || l.includes('[' + level + ']'));
   const el = document.getElementById('logs');
-  el.textContent = (data.lines || []).join('\\n');
+  el.textContent = lines.join('\\n');
   el.scrollTop = el.scrollHeight;
 }
 
@@ -505,15 +569,18 @@ function render() {
   document.getElementById('rows').innerHTML = rows.slice(0, 120).map(t => {
     const pct = t.progress && t.progress.bytesTotal ? Math.round(t.progress.bytesDone / t.progress.bytesTotal * 100) : 0;
     const speed = t.progress && t.progress.speedBps ? fmtBytes(t.progress.speedBps) + '/s' : '-';
+    const stalled = t.stage === 'downloading' && (!t.progress || !t.progress.speedBps) && Date.now() - (t.updatedAt || 0) > 60000;
+    const thumb = t.cover ? '<img class="thumb" loading="lazy" src="' + escapeHtml(t.cover) + '" alt="" />' : '';
     return \`<div class="row">
-      <div><div class="name" title="\${escapeHtml(t.title)}">\${escapeHtml(t.baseName)}</div>\${t.error ? '<div class="err">'+escapeHtml(t.error.slice(0,80))+'</div>' : ''}</div>
+      <div class="tcell">\${thumb}<div style="min-width:0"><div class="name" title="\${escapeHtml(t.title)}">\${escapeHtml(t.baseName)}</div>\${t.error ? '<div class="err">'+escapeHtml(t.error.slice(0,80))+'</div>' : ''}</div></div>
       <div>\${t.quality ? '<span class="badge">'+t.quality+'</span>' : ''}\${t.hdr ? '<span class="badge hdr">HDR</span>' : ''}\${t.fps ? '<span class="badge">'+t.fps+'fps</span>' : ''}<span class="badge \${t.engine==='ytdlp'?'ytdlp':''}">\${t.engine}</span></div>
-      <div><span class="stage \${t.stage}">\${t.stage}</span></div>
-      <div><div class="bar"><i style="width:\${pct}%"></i></div><div class="pct">\${pct}%</div></div>
+      <div><span class="stage \${t.stage}">\${t.stage}</span>\${stalled ? '<span class="badge" style="background:rgba(255,69,58,.18);color:#ff8b84">停滞</span>' : ''}\${t.retryCount > 0 ? '<span class="badge">重试 '+t.retryCount+'</span>' : ''}</div>
+      <div><div class="bar"><i style="width:\${pct}%"></i></div><div class="pct">\${pct}%\${t.progress && t.progress.etaSec ? ' · ETA '+fmtEta(t.progress.etaSec) : ''}</div></div>
       <div class="speed">\${speed}</div>
       <div class="row-actions">
         <button class="tiny" data-act="prioritize" data-id="\${t.id}">插队</button>
         <button class="tiny" data-act="retry" data-id="\${t.id}">重试</button>
+        <button class="tiny" data-act="ytdlp" data-id="\${t.id}">副引擎</button>
         <button class="tiny" data-act="cancel" data-id="\${t.id}">取消</button>
       </div>
     </div>\`;
@@ -528,6 +595,39 @@ document.getElementById('rows').addEventListener('click', async (e) => {
   loadTasks(); loadStats();
 });
 document.getElementById('btn-refresh').onclick = () => { loadTasks(); loadStats(); loadLogs(); };
+document.getElementById('btn-build-index').onclick = async () => {
+  const btn = document.getElementById('btn-build-index');
+  btn.disabled = true; btn.textContent = '重建中…';
+  const res = await (await fetch('/api/library/rebuild', { method: 'POST' })).json();
+  btn.disabled = false; btn.textContent = '重建媒体库';
+  toast(res.ok ? ('媒体库已重建：' + res.items + ' 个视频') : ('重建失败：' + (res.error || '')));
+};
+document.getElementById('btn-export-failed').onclick = async () => {
+  const head = await (await fetch('/api/tasks/failed')).json();
+  if (!head.total) { toast('当前没有失败任务'); return; }
+  const a = document.createElement('a');
+  a.href = '/api/tasks/failed?format=csv';
+  a.download = '';
+  a.click();
+  toast('已导出 ' + head.total + ' 条失败清单');
+};
+document.getElementById('btn-clear-failed').onclick = async () => {
+  const yes = await confirmSheet('清空失败队列？', '把失败任务移出队列（记录仍保留，可随时「重试」放回）。');
+  if (!yes) return;
+  const res = await (await fetch('/api/queue/clear-failed', { method: 'POST' })).json();
+  toast(res.ok ? ('已移出 ' + res.cleared + ' 个失败任务') : ('操作失败：' + (res.error || '')));
+  loadTasks(); loadStats(); loadDashboard();
+};
+document.getElementById('btn-log-dl').onclick = () => {
+  const blob = new Blob([(state.logs || []).join('\\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'bili-' + new Date().toISOString().slice(0, 10) + '.log';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('日志已导出');
+};
+document.getElementById('log-level').onchange = renderLogs;
 document.getElementById('q').oninput = render;
 document.getElementById('filter').onchange = render;
 document.getElementById('btn-save').onclick = async () => {
@@ -558,6 +658,13 @@ document.getElementById('btn-save').onclick = async () => {
       if (idx >= 0) state.tasks[idx] = data.task; else state.tasks.unshift(data.task);
       render();
     } else if (data.t === 'queue.stats') loadStats();
+    else if (data.t === 'disk.warn') {
+      toast('磁盘不足预警：仅剩 ' + (data.freeGB || 0).toFixed(1) + ' GB，下载已暂停');
+      loadDashboard();
+    } else if (data.t === 'auth.expired') {
+      toast('登录态失效，请重新扫码登录');
+      loadDashboard();
+    }
   };
   setInterval(() => { loadDashboard(); loadStats(); loadLogs(); }, 5000);
   setInterval(loadTasks, 10000);

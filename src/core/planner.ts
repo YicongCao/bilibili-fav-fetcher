@@ -120,6 +120,7 @@ export async function buildTasks(
         favTime,
         pubDate: video.pubDate || detail.pubdate * 1000,
         totalPages: pages.length,
+        folders: video.folders.map((f) => ({ fid: f.fid, title: f.title })),
         outDir: dir,
         baseName,
         container: config.mux.container,

@@ -53,7 +53,19 @@ export interface VideoMeta {
     poster?: string;
     subtitles?: { format: 'ass' | 'srt'; file: string }[];
     meta?: string;
+    size?: number;
+    container?: 'mp4' | 'mov';
+    qualityId?: number;
+    qualityLabel?: string;
+    hdr?: boolean;
+    fps?: number;
+    codec?: string;
+    width?: number;
+    height?: number;
+    taskId?: string;
+    parts?: { page: number; file: string; poster?: string; subtitles?: string[]; meta?: string }[];
     downloadedAt?: number;
+    error?: { code: string; message: string; at: number };
   };
 }
 
@@ -83,6 +95,7 @@ export interface TaskRecord {
   favTime: number;
   pubDate: number;
   totalPages: number;
+  folders: { fid: number; title: string }[];
   outDir: string;
   baseName: string;
   container: 'mp4' | 'mov';

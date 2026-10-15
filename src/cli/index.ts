@@ -12,6 +12,7 @@ import { webCommand } from './commands/web.js';
 import { buildIndexCommand } from './commands/buildIndex.js';
 import { serveCommand } from './commands/serve.js';
 import { cacheCommand } from './commands/cache.js';
+import { reconcileCommand } from './commands/reconcile.js';
 import { setCliOutputRoot } from '../config.js';
 import { log } from '../utils/logger.js';
 
@@ -137,6 +138,15 @@ program
   .option('--out <dir>', OUT_DESC, outArg)
   .action(async (opts) => {
     await cacheCommand({ done: opts.done, all: opts.all, dryRun: opts.dryRun });
+  });
+
+program
+  .command('reconcile')
+  .description('任务库对账：成品已在盘上却还停在队列中的任务补记为已完成')
+  .option('--dry-run', '只显示将要修正的任务')
+  .option('--out <dir>', OUT_DESC, outArg)
+  .action(async (opts) => {
+    await reconcileCommand({ dryRun: opts.dryRun });
   });
 
 program

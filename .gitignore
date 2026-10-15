@@ -1,0 +1,10 @@
+node_modules/
+outputs/
+state/
+.local/
+bin/
+*.part
+*.part[0-9]
+*.muxing
+*.m4s
+.DS_Store

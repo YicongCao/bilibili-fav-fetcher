@@ -3,7 +3,7 @@ import { DEFAULT_COOKIE_FILE, loadCookieFile } from '../../auth/cookie.js';
 import { loadConfig } from '../../config.js';
 import { readJson } from '../../utils/fsx.js';
 import { log } from '../../utils/logger.js';
-import { buildTasks } from '../../core/planner.js';
+import { applyPlannedTasks, buildTasks } from '../../core/planner.js';
 import { TaskStore } from '../../core/taskStore.js';
 import { DownloadQueue } from '../../core/queue.js';
 import { runQueue } from '../../core/pipeline.js';
@@ -55,8 +55,8 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
     const index = await readJson<IndexFile>(`${config.output.root}/index.json`);
     if (index) {
       const tasks = await buildTasks(store.cookies, index.videos, { source: 'favorite', limit: options.limit });
-      for (const t of tasks) taskStore.upsert(t);
-      queue.enqueue(tasks);
+      const added = applyPlannedTasks(taskStore, queue, tasks);
+      if (added < tasks.length) log.info(`跳过 ${tasks.length - added} 个已完成/已跳过的任务`);
     }
     await checkEngines(store.cookies);
   }

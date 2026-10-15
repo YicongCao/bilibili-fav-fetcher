@@ -2,7 +2,7 @@ import { DEFAULT_COOKIE_FILE, loadCookieFile } from '../../auth/cookie.js';
 import { loadConfig } from '../../config.js';
 import { readJson } from '../../utils/fsx.js';
 import { log } from '../../utils/logger.js';
-import { buildTasks } from '../../core/planner.js';
+import { applyPlannedTasks, buildTasks } from '../../core/planner.js';
 import { TaskStore } from '../../core/taskStore.js';
 import { DownloadQueue } from '../../core/queue.js';
 import { destPath, runQueue } from '../../core/pipeline.js';
@@ -67,8 +67,8 @@ export async function downloadCommand(options: DownloadOptions): Promise<void> {
 
   const queue = await DownloadQueue.load(config.output.root, taskStore);
   queue.resume();
-  for (const t of tasks) taskStore.upsert(t);
-  queue.enqueue(tasks);
+  const added = applyPlannedTasks(taskStore, queue, tasks);
+  if (added < tasks.length) log.info(`跳过 ${tasks.length - added} 个已完成/已跳过的任务`);
 
   const engines = await checkEngines(store.cookies);
   log.print(`引擎：主 native ✓，副 yt-dlp ${engines.ytdlp ? '✓' : '✗（自动切换已关闭）'}`);

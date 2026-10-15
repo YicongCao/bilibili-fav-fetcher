@@ -6,6 +6,7 @@ import { log } from '../utils/logger.js';
 import { getConfig } from '../config.js';
 import { buildBaseName, usePartSuffix } from './namer.js';
 import { deletedKey, loadDeleted } from './deleted.js';
+import type { TaskStore } from './taskStore.js';
 import type { TaskRecord, VideoMeta } from '../types/index.js';
 
 export function taskId(bvid: string, cid: number, quality: string, container: string): string {
@@ -26,6 +27,26 @@ async function getViewCached(cookies: Record<string, string>, bvid: string, root
   await mkdir(path.dirname(cacheFile), { recursive: true });
   await writeFile(cacheFile, JSON.stringify({ at: Date.now(), data }), 'utf8');
   return data;
+}
+
+/**
+ * 把规划出的任务写入任务库并入队。
+ * 已完成/已跳过的任务不覆盖、不重排 —— 否则每次启动都会把它们冲回 queued，丢掉历史与统计。
+ */
+export function applyPlannedTasks(
+  store: Pick<TaskStore, 'get' | 'upsert'>,
+  queue: { enqueue: (tasks: TaskRecord[]) => void },
+  tasks: TaskRecord[],
+): number {
+  let added = 0;
+  for (const t of tasks) {
+    const prev = store.get(t.id);
+    if (prev && (prev.stage === 'done' || prev.stage === 'skipped')) continue;
+    store.upsert(t);
+    queue.enqueue([t]);
+    added += 1;
+  }
+  return added;
 }
 
 export interface BuildTasksOptions {

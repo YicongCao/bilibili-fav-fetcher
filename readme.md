@@ -143,7 +143,8 @@ outputs/
 │  └─ <标题> [P1] [BV号].meta.json
 ├─ up/<UP名>(<mid>)/            # UP 主模式产物
 ├─ .state/                      # tasks.json / queue.json（断点续传依据）
-└─ .cache/                      # 下载中间分片（未自动清理，见「已知限制」）
+│  └─ deleted.json              # 媒体库里手动删除的分 P（保留 metadata，避免重复下载）
+└─ .cache/                      # 下载中间分片（成功后自动回收，见「已知限制」）
 ```
 
 ## 配置
@@ -166,6 +167,7 @@ outputs/
 | `timeout` | `idleMs` / `stallMs` / `taskMs` | `20000` / `60000` / `1800000` | 读空闲、速率停滞、任务总时长 |
 | `engines` | `mode` / `ytdlp.autoDownload` | `auto` / `true` | 引擎模式、副引擎二进制自动获取 |
 | `control` | `host` / `port` | `127.0.0.1` / `8765` | 控制端监听 |
+| `scan` | `includeCollectedFolders` | `false` | 是否一并扫描「收藏的他人收藏夹」 |
 
 ## 已确认的产品决策
 
@@ -184,9 +186,28 @@ outputs/
 
 - **历史残留分片需手动清一次**：自动回收只对新完成的任务生效；此前攒下的残留用 `bili cache`（只清已完成任务的）或 `bili cache --all` 处理，dashboard 会单独显示「缓存」占用。
 - **占用上限只做「不再新增」**：达到 `limits.maxOutputGB` 后暂停下载队列，但不会自动删除已有内容（在途任务会跑完）。
-- **登录态不自动续期**：`refresh_token` 续期尚未实现，cookie 过期后需重新 `bili login`。
+- **登录态不自动续期**：`refresh_token` 续期尚未实现，cookie 过期后需重新 `bili login`；控制端会给出红色告警条，但页面内扫码（PLAN §3.12 的 `GET /api/login/qr`）还没做。
 - **控制端默认端口 8765**：若被其他程序（如编辑器）占用，用 `bili web --port <其他端口>`。
 - HLS / 加密 m3u8 源目前未做专项样本验证；主引擎优先处理 DASH 与多段 durl。
+
+## 常见问题与故障排查
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `控制端端口 8765 已被占用` | 端口被其他程序（编辑器等）占用 | `bili web --port 8899` |
+| 控制端提示「登录态失效」/`-101` | cookie 过期（约数月）或被踢 | 重新 `bili login --qr`；控制端顶部会有红色告警条 |
+| 重启后又自动下载了几个 | 旧版本启动会强制 resume | 新版沿用上次队列状态；也可 `bili web --paused` 强制启动即暂停 |
+| 按钮显示「暂停下载」但速度还在跑 | 「暂停」只停止取新任务，在飞任务会跑完 | 属预期；在飞数归零后按钮变「继续下载」 |
+| 磁盘被分片缓存吃满 | 历史任务残留分片 | `bili cache --dry-run` 看占用 → `bili cache` 只清已完成任务的；dashboard 有「清理已完成缓存」按钮 |
+| 任务卡住不动、显示「停滞」 | 网络/风控导致长时间无速度 | 看门狗会自动重连 → 重建会话 → 切换副引擎；也可在任务行点「副引擎」手动切 |
+| 下载到的清晰度比预期低 | 非大会员无高码流权益 / 稿件本身无该档 | 属正常降级，任务会标记 `degraded`；确认账号权益后用「副引擎」重试一次 |
+| 媒体库页面空白 | `library.js` 损坏或未生成 | 控制端点「重建媒体库」，或 `bili build-index` |
+| 媒体库里删掉的视频又被下载 | 删除标记丢失 | 标记在 `.state/deleted.json`；删除请走页面按钮，不要手删文件 |
+| `file://` 打开媒体库能看不能拖进度条 | 浏览器限制本地文件 Range | 用 `bili serve` 或控制端的 `/library` |
+| ffmpeg 缺失 | 系统未装 | `brew install ffmpeg`，或让程序自动下载 `ffmpeg-static` |
+| 大量 `-412` / `-352` | 请求过频被风控 | 控制端把并行降到 1、设 `maxSpeed` 限速；或在配置里调大 `download.requestIntervalMs` |
+
+日志文件：`outputs/.state/logs/<日期>.log`（控制端「日志」面板可按级别过滤并导出）。
 
 ## 环境要求
 

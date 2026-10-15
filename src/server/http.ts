@@ -9,7 +9,14 @@ import { getConfig, setConfig, type Config } from '../config.js';
 import { log } from '../utils/logger.js';
 import { formatBytes } from '../utils/fsx.js';
 import { nav } from '../api/nav.js';
-import { expiresInDays } from '../auth/cookie.js';
+import {
+  COOKIE_SCHEMA,
+  DEFAULT_COOKIE_FILE,
+  expiresInDays,
+  saveCookieFile,
+} from '../auth/cookie.js';
+import { qrStart, qrPollOnce, type QrSession } from '../auth/qrlogin.js';
+import QRCode from 'qrcode';
 import { outputUsage, invalidateUsage } from '../core/disk.js';
 import { cleanAllCache, cleanDoneCache } from '../core/cache.js';
 import { enqueueFavorites, enqueueUp, listFolders, refreshFavorites, type EnqueueCtx } from '../core/enqueue.js';
@@ -40,6 +47,8 @@ interface AuthSnapshot {
 }
 
 let authCache: AuthSnapshot = { login: false, checkedAt: 0 };
+/** 当前进行中的扫码会话（页面可见，登录成功即清空） */
+let qrSession: QrSession | null = null;
 
 /** 刷新登录态快照（5 分钟内复用，失败保留上次结果） */
 async function refreshAuth(ctx: ServerContext): Promise<AuthSnapshot> {
@@ -215,6 +224,52 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
         },
         auth,
       });
+      return;
+    }
+
+    // 扫码登录：控制端在登录态失效时可直接扫码，不用回终端
+    if (route === '/api/login/qr' && req.method === 'POST') {
+      qrSession = await qrStart();
+      json(res, { ok: true, url: qrSession.url, png: '/api/login/qr.png' });
+      return;
+    }
+
+    if (route === '/api/login/qr.png') {
+      if (!qrSession) {
+        res.writeHead(404).end();
+        return;
+      }
+      const png = await QRCode.toBuffer(qrSession.url, { width: 320, margin: 1 });
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length, 'Cache-Control': 'no-store' });
+      res.end(png);
+      return;
+    }
+
+    if (route === '/api/login/qr/status') {
+      if (!qrSession) {
+        json(res, { status: 'idle', tip: '未发起扫码' });
+        return;
+      }
+      const polled = await qrPollOnce(qrSession);
+      if (polled.status === 'done' && polled.result) {
+        const file = config.auth?.cookieFile ?? DEFAULT_COOKIE_FILE;
+        await saveCookieFile(file, {
+          schema: COOKIE_SCHEMA,
+          cookies: polled.result.cookies,
+          refreshToken: polled.result.refreshToken,
+          expiresAt: polled.result.expiresAt,
+          savedAt: Date.now(),
+        });
+        ctx.cookies = polled.result.cookies;
+        ctx.cookieExpiresAt = polled.result.expiresAt;
+        qrSession = null;
+        authCache = { login: false, checkedAt: 0 };
+        await refreshAuth(ctx);
+        log.info('控制端扫码登录成功，已写入 ' + file);
+      } else if (polled.status === 'expired') {
+        qrSession = await qrStart();
+      }
+      json(res, { status: polled.status, tip: polled.tip });
       return;
     }
 

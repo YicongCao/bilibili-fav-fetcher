@@ -240,6 +240,7 @@ export function renderControlPage(): string {
     <button id="btn-dl" class="filled">暂停下载</button>
     <button id="btn-mux" class="tinted">暂停转码</button>
     <a href="/library" target="_blank" rel="noreferrer"><button class="tinted">打开媒体库</button></a>
+    <button id="btn-login" class="filled" style="display:none">扫码登录</button>
     <button id="btn-clean-cache">清理已完成缓存</button>
     <button id="btn-build-index">重建媒体库</button>
     <button id="btn-export-failed">导出失败清单</button>
@@ -346,6 +347,16 @@ export function renderControlPage(): string {
   <div class="acts"><button id="sheet-cancel">取消</button><button id="sheet-ok">确定</button></div>
 </div></dialog>
 
+<dialog id="qr"><div class="alert" style="padding-bottom:4px">
+  <div class="body">
+    <div class="title">扫码登录哔哩哔哩</div>
+    <div class="msg">用手机 App 扫描下方二维码；成功后会自动写入登录态并继续下载。</div>
+    <img id="qr-img" alt="登录二维码" style="width:220px;height:220px;margin:12px auto 6px;display:block;border-radius:12px;background:#fff" />
+    <div class="msg" id="qr-tip">正在生成二维码…</div>
+  </div>
+  <div class="acts"><button id="qr-close">关闭</button></div>
+</div></dialog>
+
 <script>
 const state = { tasks: [], stats: {}, dash: null, logs: [] };
 const fmtBytes = (n) => { const u=['B','KB','MB','GB','TB']; let v=n||0,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(i?1:0)+' '+u[i]; };
@@ -441,6 +452,8 @@ async function loadDashboard() {
   dl.disabled = false;
   const mx = document.getElementById('btn-mux');
   mx.textContent = d.mux && d.mux.paused ? '继续转码' : '暂停转码';
+  // 未登录时给一个页面内扫码入口，不用回终端
+  document.getElementById('btn-login').style.display = a.login ? 'none' : '';
 }
 
 document.getElementById('btn-dl').onclick = async () => {
@@ -453,6 +466,31 @@ document.getElementById('btn-mux').onclick = async () => {
   await fetch(paused ? '/api/mux/resume' : '/api/mux/pause', { method: 'POST' });
   loadDashboard();
 };
+let qrTimer = null;
+document.getElementById('btn-login').onclick = async () => {
+  const dlg = document.getElementById('qr');
+  document.getElementById('qr-tip').textContent = '正在生成二维码…';
+  dlg.showModal();
+  await fetch('/api/login/qr', { method: 'POST' });
+  document.getElementById('qr-img').src = '/api/login/qr.png?t=' + Date.now();
+  clearInterval(qrTimer);
+  qrTimer = setInterval(async () => {
+    const s = await (await fetch('/api/login/qr/status')).json();
+    document.getElementById('qr-tip').textContent = s.tip || '';
+    if (s.status === 'done') {
+      clearInterval(qrTimer); qrTimer = null;
+      dlg.close(); toast('登录成功'); loadDashboard(); loadStats();
+    } else if (s.status === 'expired') {
+      await fetch('/api/login/qr', { method: 'POST' });
+      document.getElementById('qr-img').src = '/api/login/qr.png?t=' + Date.now();
+    }
+  }, 1500);
+};
+document.getElementById('qr-close').onclick = () => {
+  clearInterval(qrTimer); qrTimer = null;
+  document.getElementById('qr').close();
+};
+
 document.getElementById('btn-clean-cache').onclick = async () => {
   const yes = await confirmSheet('清理分片缓存？', '删除已完成 / 已跳过任务遗留的中间分片，未完成任务的分片会保留，不影响续传。');
   if (!yes) return;

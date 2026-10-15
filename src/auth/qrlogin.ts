@@ -51,6 +51,64 @@ function cookiesFromLoginUrl(url: string): { cookies: Record<string, string>; ex
   return { cookies, expiresAt: expires ? Number(expires) * 1000 : undefined };
 }
 
+export interface QrSession {
+  qrcodeKey: string;
+  url: string;
+  buvid3: string;
+  buvid4?: string;
+}
+
+/** 只生成二维码（供控制端网页使用，不打印到终端） */
+export async function qrStart(): Promise<QrSession> {
+  const { url, qrcodeKey } = await generate();
+  const { buvid3, buvid4 } = await fetchFingerprint();
+  return { qrcodeKey, url, buvid3, buvid4 };
+}
+
+export type QrPollStatus = 'waiting' | 'scanned' | 'expired' | 'done' | 'error';
+
+export interface QrPollResult {
+  status: QrPollStatus;
+  tip: string;
+  result?: QrLoginResult;
+}
+
+/** 轮询一次（供控制端网页使用） */
+export async function qrPollOnce(session: QrSession): Promise<QrPollResult> {
+  try {
+    const { json, headers } = await requestJson<QrPoll>(
+      `${PASSPORT_BASE}/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(session.qrcodeKey)}`,
+      {
+        timeoutMs: 10_000,
+        retries: 1,
+        cookies: { buvid3: session.buvid3, ...(session.buvid4 ? { buvid4: session.buvid4 } : {}) },
+        headers: { 'User-Agent': UA, Referer: 'https://passport.bilibili.com/' },
+      },
+    );
+    const status = json.data?.code ?? json.code;
+    if (status === 0 && json.data?.url) {
+      const { cookies, expiresAt } = cookiesFromLoginUrl(json.data.url);
+      const setCookies = extractSetCookies({ headers });
+      const merged: Record<string, string> = {
+        buvid3: session.buvid3,
+        ...(session.buvid4 ? { buvid4: session.buvid4 } : {}),
+        ...cookies,
+        ...setCookies,
+      };
+      Object.keys(merged).forEach((k) => {
+        if (!merged[k]) delete merged[k];
+      });
+      return { status: 'done', tip: '登录成功', result: { cookies: merged, refreshToken: json.data.refresh_token, expiresAt } };
+    }
+    if (status === 86101) return { status: 'waiting', tip: '等待扫码…' };
+    if (status === 86090) return { status: 'scanned', tip: '已扫码，请在手机上确认…' };
+    if (status === 86038) return { status: 'expired', tip: '二维码已失效' };
+    return { status: 'error', tip: `未成功（${status}）` };
+  } catch (err) {
+    return { status: 'error', tip: (err as Error).message };
+  }
+}
+
 export async function qrLogin(opts: { timeoutMs?: number } = {}): Promise<QrLoginResult> {
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const { url, qrcodeKey } = await generate();

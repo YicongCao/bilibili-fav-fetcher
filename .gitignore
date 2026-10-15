@@ -10,3 +10,5 @@ bin/
 *.m4s
 .DS_Store
 .tmp/
+*.log
+.tmp*

@@ -8,6 +8,7 @@ import { downloadCommand } from './commands/download.js';
 import { statusCommand } from './commands/status.js';
 import { repairCommand } from './commands/repair.js';
 import { upCommand } from './commands/up.js';
+import { webCommand } from './commands/web.js';
 import { log } from '../utils/logger.js';
 
 const program = new Command();
@@ -80,6 +81,27 @@ program
       keyword: opts.keyword,
       limit: opts.limit ? Number(opts.limit) : undefined,
       dryRun: opts.dryRun,
+      cookieFile: opts.cookieFile,
+    });
+  });
+
+program
+  .command('web')
+  .description('启动控制端网页（实时看板 + 任务控制 + 配置热更新）')
+  .option('--port <n>', '端口', '8765')
+  .option('--host <ip>', '监听地址', '127.0.0.1')
+  .option('--no-open', '不自动打开浏览器')
+  .option('--limit <n>', '只规划前 n 个任务')
+  .option('--no-download', '只开看板，不启动下载')
+  .option('--cookie-file <path>', '登录态路径', '.local/cookies.json')
+  .action(async (opts) => {
+    await webCommand({
+      port: Number(opts.port),
+      host: opts.host,
+      noOpen: opts.noOpen,
+      limit: opts.limit ? Number(opts.limit) : undefined,
+      // commander 把 --no-download 解析为 opts.download === false
+      noDownload: opts.download === false,
       cookieFile: opts.cookieFile,
     });
   });

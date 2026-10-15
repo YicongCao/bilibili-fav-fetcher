@@ -1,0 +1,201 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { renderControlPage } from '../web/controlPage.js';
+import { bus, toSummary, type ServerEvent } from './events.js';
+import { getConfig, setConfig, type Config } from '../config.js';
+import { log } from '../utils/logger.js';
+import { formatBytes } from '../utils/fsx.js';
+import type { TaskStore } from '../core/taskStore.js';
+import type { DownloadQueue } from '../core/queue.js';
+import type { TaskRecord } from '../types/index.js';
+
+export interface ServerContext {
+  store: TaskStore;
+  queue: DownloadQueue;
+  root: string;
+}
+
+function json(res: ServerResponse, data: unknown, code = 200): void {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(data));
+}
+
+async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  if (!chunks.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** 启动控制端：REST + SSE 实时推送 + 静态媒体库 */
+export async function startServer(ctx: ServerContext): Promise<{ url: string; close: () => void }> {
+  const config = getConfig();
+  const sseClients = new Set<ServerResponse>();
+
+  const unsubscribe = bus.on((event: ServerEvent) => {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const res of sseClients) {
+      res.write(payload);
+    }
+  });
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+    const route = url.pathname;
+
+    // SSE 事件流
+    if (route === '/api/events') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+      res.write('data: {"t":"hello"}\n\n');
+      sseClients.add(res);
+      req.on('close', () => sseClients.delete(res));
+      return;
+    }
+
+    if (route === '/' || route === '/control') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderControlPage());
+      return;
+    }
+
+    if (route === '/api/tasks') {
+      const limit = Number(url.searchParams.get('limit') ?? 200);
+      const list = ctx.store
+        .all()
+        .sort((a, b) => rank(a) - rank(b))
+        .slice(0, limit)
+        .map(toSummary);
+      json(res, { tasks: list, total: ctx.store.all().length });
+      return;
+    }
+
+    if (route === '/api/stats') {
+      const snapshot = ctx.queue.snapshot();
+      json(res, {
+        status: snapshot.status,
+        order: snapshot.order.length,
+        remaining: ctx.queue.remaining(),
+        inflight: snapshot.inflight.length,
+        delayed: snapshot.delayed.length,
+        ...snapshot.stats,
+      });
+      return;
+    }
+
+    if (route === '/api/queue/pause' && req.method === 'POST') {
+      ctx.queue.pause();
+      bus.emit({ t: 'queue.stats', stats: {} as never });
+      json(res, { ok: true });
+      return;
+    }
+
+    if (route === '/api/queue/resume' && req.method === 'POST') {
+      ctx.queue.resume();
+      json(res, { ok: true });
+      return;
+    }
+
+    const taskMatch = route.match(/^\/api\/tasks\/([^/]+)\/(\w+)$/);
+    if (taskMatch && req.method === 'POST') {
+      const [, id, action] = taskMatch;
+      const task = ctx.store.get(id);
+      if (!task) {
+        json(res, { ok: false, error: '任务不存在' }, 404);
+        return;
+      }
+      if (action === 'cancel') {
+        ctx.queue.cancel(id);
+        task.stage = 'paused';
+      } else if (action === 'retry') {
+        task.retryCount = 0;
+        task.error = undefined;
+        task.stage = 'queued';
+        ctx.queue.prioritize(id);
+      } else if (action === 'prioritize') {
+        task.stage = 'queued';
+        ctx.queue.prioritize(id);
+      } else if (action === 'pause') {
+        task.stage = 'paused';
+      } else {
+        json(res, { ok: false, error: `不支持的操作 ${action}` }, 400);
+        return;
+      }
+      ctx.store.upsert(task);
+      bus.emit({ t: 'task.update', task: toSummary(task) });
+      json(res, { ok: true });
+      return;
+    }
+
+    if (route === '/api/config') {
+      if (req.method === 'PATCH') {
+        const patch = (await body(req)) as Partial<Config>;
+        const merged = { ...getConfig(), ...patch } as Config;
+        setConfig(merged);
+        bus.emit({ t: 'config.updated', config: merged });
+        json(res, { ok: true, config: merged });
+        return;
+      }
+      json(res, getConfig());
+      return;
+    }
+
+    if (route === '/api/logs/tail') {
+      const day = new Date().toISOString().slice(0, 10);
+      const file = path.join(ctx.root, '.state', 'logs', `${day}.log`);
+      try {
+        const text = await readFile(file, 'utf8');
+        json(res, { lines: text.split('\n').slice(-200) });
+      } catch {
+        json(res, { lines: [] });
+      }
+      return;
+    }
+
+    // 静态媒体库（图片 / 视频 / 索引页）
+    const filePath = path.join(ctx.root, decodeURIComponent(route.replace(/^\/+/, '')));
+    if (filePath.startsWith(path.resolve(ctx.root))) {
+      try {
+        const data = await readFile(filePath);
+        const ext = path.extname(filePath).toLowerCase();
+        const type =
+          ext === '.mp4' || ext === '.mov' ? 'video/mp4' : ext === '.jpg' || ext === '.png' ? `image/${ext.slice(1)}` : 'application/octet-stream';
+        res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes' });
+        res.end(data);
+        return;
+      } catch {
+        /* 继续 404 */
+      }
+    }
+
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not Found');
+  });
+
+  await new Promise<void>((resolve) => server.listen(config.control.port, config.control.host, resolve));
+  const url = `http://${config.control.host}:${config.control.port}`;
+  log.info(`控制端已启动：${url}`);
+  void formatBytes(0);
+
+  return {
+    url,
+    close: () => {
+      unsubscribe();
+      for (const res of sseClients) res.end();
+      server.close();
+    },
+  };
+}
+
+function rank(task: TaskRecord): number {
+  const order: Record<string, number> = { downloading: 0, muxing: 1, finalizing: 2, planning: 3, queued: 4, failed: 5, paused: 6, skipped: 7, done: 8 };
+  return order[task.stage] ?? 9;
+}

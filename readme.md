@@ -8,7 +8,7 @@
 
 - **登录态**：扫码 / 手动粘贴 / 导入 Cookie，凭据本地保存（`.local/cookies.json`，权限 0600）
 - **自定义输出目录**：`--out /Volumes/xxx/outputs`（或 `BILI_OUT` 环境变量、`config.json` 里的 `output.root`），可直接指向外置硬盘
-- **占用上限**：`limits.maxOutputGB`（默认 500GB）限制 outputs 目录总占用，超限自动暂停下载队列
+- **占用上限**：`limits.maxOutputGB`（默认 800GB）限制 outputs 目录总占用，超限自动暂停下载队列
 - **收藏夹扫描**：按收藏夹名称建目录，导出 `outputs/index.json` 全量 metadata
 - **UP 主模式**：给 mid / 主页 URL / 昵称，按发布时间从新到旧下载全部投稿
 - **最高可用画质**：自动选账号可播的最高档（大会员即 8K / 4K / HDR / 杜比视界 / 60fps），无权益自动降级
@@ -155,7 +155,7 @@ outputs/
 | 分组 | 键 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `auth` | `cookieFile` | `.local/cookies.json` | 登录态路径，也可用 `--cookie-file` 覆盖 |
-| `limits` | `maxOutputGB` / `warnRatio` / `pauseOnExceed` | `500` / `0.9` / `true` | outputs 总占用上限（GB）、告警比例、超限自动暂停 |
+| `limits` | `maxOutputGB` / `warnRatio` / `pauseOnExceed` | `800` / `0.9` / `true` | outputs 总占用上限（GB）、告警比例、超限自动暂停 |
 | `output` | `root` / `filenameTemplate` / `partSuffix` | `outputs` / `{title} [P{p}] [{bvid}]` / `auto` | 目录与命名 |
 | `output` | `sidecarMeta` / `nfo` | `true` / `false` | 同名 `.meta.json`、可选 `.nfo` |
 | `output` | `cleanCacheOnDone` | `true` | 封装成功后立即删除该任务的中间分片 |

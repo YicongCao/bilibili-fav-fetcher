@@ -102,7 +102,7 @@ export interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  limits: { maxOutputGB: 500, warnRatio: 0.9, checkEveryMs: 60_000, pauseOnExceed: true },
+  limits: { maxOutputGB: 800, warnRatio: 0.9, checkEveryMs: 60_000, pauseOnExceed: true },
   auth: { cookieFile: '.local/cookies.json' },
   output: {
     root: 'outputs',

@@ -45,6 +45,9 @@ export function renderControlPage(): string {
   .dash-actions { display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap; }
   .dash-actions .muted { color:var(--muted); font-size:12px; }
   .dash-actions a { text-decoration:none; }
+  .tabs { display:flex; gap:6px; margin-bottom:6px; }
+  .tab { flex:1; }
+  .tab.active { background:#17324d; border-color:#2b5d8c; }
   .usage { margin-top:10px; display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted); }
   .usage .bar { flex:1; }
   .usage .bar > i.over { background:var(--err); }
@@ -83,6 +86,7 @@ export function renderControlPage(): string {
     <button id="btn-dl" class="primary">暂停下载</button>
     <button id="btn-mux" class="primary">暂停转码</button>
     <a href="/library" target="_blank" rel="noreferrer"><button>打开媒体库</button></a>
+    <button id="btn-clean-cache">清理已完成缓存</button>
     <span class="muted" id="d-root"></span>
   </div>
   <div class="usage">
@@ -109,6 +113,38 @@ export function renderControlPage(): string {
     </table>
   </section>
   <aside style="display:flex;flex-direction:column;gap:16px">
+    <section class="panel">
+      <h1 style="font-size:13px;margin-bottom:8px">添加下载</h1>
+      <div class="tabs">
+        <button id="tab-fav" class="tab active">收藏夹</button>
+        <button id="tab-up" class="tab">UP 主</button>
+      </div>
+      <div id="pane-fav">
+        <label>收藏夹</label>
+        <select id="add-folder"><option value="">全部收藏夹</option></select>
+        <label>数量上限（留空 = 全部）</label>
+        <input id="add-fav-limit" type="number" min="1" placeholder="例如 20" />
+        <label>排序</label>
+        <select id="add-fav-order">
+          <option value="favTime">按收藏时间（新→旧）</option>
+          <option value="pubDate">按发布时间（新→旧）</option>
+        </select>
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+          <button id="btn-add-fav" class="primary">加入队列</button>
+          <button id="btn-scan">刷新收藏夹</button>
+        </div>
+      </div>
+      <div id="pane-up" style="display:none">
+        <label>UP 主（mid / 主页链接 / 昵称）</label>
+        <input id="add-up-target" placeholder="123456 或 space.bilibili.com/123456" />
+        <label>数量上限（留空 = 全部投稿）</label>
+        <input id="add-up-limit" type="number" min="1" placeholder="例如 10" />
+        <label>标题关键词（可选）</label>
+        <input id="add-up-kw" placeholder="留空不过滤" />
+        <div style="margin-top:10px"><button id="btn-add-up" class="primary">抓取并加入队列</button></div>
+      </div>
+      <div id="add-msg" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+    </section>
     <section class="panel">
       <h1 style="font-size:13px;margin-bottom:8px">热改配置</h1>
       <label>并行任务数（1-3）</label>
@@ -184,6 +220,77 @@ document.getElementById('btn-mux').onclick = async () => {
   const paused = state.dash && state.dash.mux && state.dash.mux.paused;
   await fetch(paused ? '/api/mux/resume' : '/api/mux/pause', { method: 'POST' });
   loadDashboard();
+};
+document.getElementById('btn-clean-cache').onclick = async () => {
+  if (!confirm('删除已完成/已跳过任务遗留的中间分片（未完成任务的分片保留）？')) return;
+  const btn = document.getElementById('btn-clean-cache');
+  btn.disabled = true; btn.textContent = '清理中…';
+  const res = await (await fetch('/api/cache/clean', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ scope: 'done' }) })).json();
+  btn.disabled = false; btn.textContent = '清理已完成缓存';
+  alert(res.ok ? '已释放 ' + fmtBytes(res.bytes) + '（' + res.removed + ' 个目录）' : ('清理失败：' + (res.error || '')));
+  loadDashboard();
+};
+
+// 添加下载：收藏夹 / UP 主两个入口
+const msg = (t) => { document.getElementById('add-msg').textContent = t; };
+function switchTab(which) {
+  document.getElementById('pane-fav').style.display = which === 'fav' ? '' : 'none';
+  document.getElementById('pane-up').style.display = which === 'up' ? '' : 'none';
+  document.getElementById('tab-fav').className = 'tab' + (which === 'fav' ? ' active' : '');
+  document.getElementById('tab-up').className = 'tab' + (which === 'up' ? ' active' : '');
+}
+document.getElementById('tab-fav').onclick = () => switchTab('fav');
+document.getElementById('tab-up').onclick = () => switchTab('up');
+
+async function loadFolders() {
+  const data = await (await fetch('/api/folders')).json();
+  const sel = document.getElementById('add-folder');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部收藏夹</option>' + (data.folders || []).map(f => '<option value="' + escapeHtml(f.title) + '">' + escapeHtml(f.title) + '（' + f.count + '）</option>').join('');
+  sel.value = cur;
+}
+
+document.getElementById('btn-add-fav').onclick = async () => {
+  const btn = document.getElementById('btn-add-fav');
+  btn.disabled = true; msg('正在规划任务…');
+  const res = await (await fetch('/api/enqueue/favorites', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      folder: document.getElementById('add-folder').value || undefined,
+      limit: document.getElementById('add-fav-limit').value ? Number(document.getElementById('add-fav-limit').value) : undefined,
+      order: document.getElementById('add-fav-order').value,
+    }),
+  })).json();
+  btn.disabled = false;
+  msg(res.ok ? ('已加入 ' + res.added + ' 个任务（匹配 ' + res.matched + ' 个稿件）') : ('失败：' + (res.error || '')));
+  loadTasks(); loadStats(); loadDashboard();
+};
+
+document.getElementById('btn-scan').onclick = async () => {
+  const btn = document.getElementById('btn-scan');
+  btn.disabled = true; msg('正在重新扫描收藏夹…');
+  const res = await (await fetch('/api/scan', { method: 'POST' })).json();
+  btn.disabled = false;
+  msg(res.ok ? ('扫描完成：' + res.videos + ' 个视频，' + res.dirs + ' 个目录') : ('失败：' + (res.error || '')));
+  loadFolders();
+};
+
+document.getElementById('btn-add-up').onclick = async () => {
+  const target = document.getElementById('add-up-target').value.trim();
+  if (!target) { msg('请填写 UP 主 mid / 主页链接 / 昵称'); return; }
+  const btn = document.getElementById('btn-add-up');
+  btn.disabled = true; msg('正在抓取 ' + target + ' 的投稿…');
+  const res = await (await fetch('/api/enqueue/up', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      target,
+      limit: document.getElementById('add-up-limit').value ? Number(document.getElementById('add-up-limit').value) : undefined,
+      keyword: document.getElementById('add-up-kw').value || undefined,
+    }),
+  })).json();
+  btn.disabled = false;
+  msg(res.ok ? (res.up + '（mid=' + res.mid + '）共 ' + res.total + ' 个投稿，已加入 ' + res.added + ' 个任务 → ' + res.dir) : ('失败：' + (res.error || '')));
+  loadTasks(); loadStats(); loadDashboard();
 };
 
 async function loadTasks() {
@@ -263,7 +370,7 @@ document.getElementById('btn-save').onclick = async () => {
   document.getElementById('cfg-speed').value = cfg.download.maxSpeed ?? '';
   document.getElementById('cfg-quality').value = cfg.download.quality;
   document.getElementById('cfg-engine').value = cfg.engines.mode;
-  await loadDashboard(); await loadStats(); await loadTasks(); await loadLogs();
+  await loadDashboard(); await loadStats(); await loadTasks(); await loadLogs(); await loadFolders();
   const es = new EventSource('/api/events');
   es.onmessage = (e) => {
     const data = JSON.parse(e.data);

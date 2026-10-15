@@ -11,6 +11,7 @@ import { upCommand } from './commands/up.js';
 import { webCommand } from './commands/web.js';
 import { buildIndexCommand } from './commands/buildIndex.js';
 import { serveCommand } from './commands/serve.js';
+import { cacheCommand } from './commands/cache.js';
 import { setCliOutputRoot } from '../config.js';
 import { log } from '../utils/logger.js';
 
@@ -123,6 +124,17 @@ program
       noDownload: opts.download === false,
       cookieFile: opts.cookieFile,
     });
+  });
+
+program
+  .command('cache')
+  .description('清理中间分片缓存（默认只清已完成任务的残留）')
+  .option('--done', '只清已完成/已跳过任务的缓存（默认）')
+  .option('--all', '清空全部分片缓存（未完成任务将重新下载）')
+  .option('--dry-run', '只显示将释放多少空间')
+  .option('--out <dir>', OUT_DESC, outArg)
+  .action(async (opts) => {
+    await cacheCommand({ done: opts.done, all: opts.all, dryRun: opts.dryRun });
   });
 
 program

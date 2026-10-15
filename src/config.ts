@@ -27,6 +27,8 @@ export interface Config {
     preferNonDefaultFolder: boolean;
     excludedFolders: string[];
     upDirTemplate: string;
+    /** 任务封装成功后立即删除它的中间分片 */
+    cleanCacheOnDone: boolean;
   };
   scan: { includeCollectedFolders: boolean; resourceOrder: 'mtime' | 'view' };
   download: {
@@ -109,6 +111,7 @@ export const DEFAULT_CONFIG: Config = {
     preferNonDefaultFolder: true,
     excludedFolders: [],
     upDirTemplate: 'up/{up}({mid})',
+    cleanCacheOnDone: true,
   },
   scan: { includeCollectedFolders: false, resourceOrder: 'mtime' },
   download: {

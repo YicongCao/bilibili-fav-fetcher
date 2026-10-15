@@ -8,7 +8,8 @@ import { muxToContainer } from './muxer.js';
 import { probeFile } from '../utils/ffmpeg.js';
 import { finalizeTask } from './finalize.js';
 import { Watchdog } from './watchdog.js';
-import { outputUsage, isOverLimit, isNearLimit, type DiskUsage } from './disk.js';
+import { outputUsage, isOverLimit, isNearLimit, invalidateUsage, type DiskUsage } from './disk.js';
+import { cleanTaskCache } from './cache.js';
 import { waitMuxGate } from './muxGate.js';
 import { createEngine, decideEngine, type EngineName } from './engines/index.js';
 import type { TaskRecord } from '../types/index.js';
@@ -43,6 +44,8 @@ async function processTask(task: TaskRecord, ctx: PipelineContext, hooks: Pipeli
     task.stage = 'skipped';
     ctx.store.upsert(task);
     ctx.queue.complete(task.id, 'skipped');
+    // 成品已存在，残留分片没有意义
+    if (config.output.cleanCacheOnDone) await cleanTaskCache(root, task.id);
     hooks.onTaskUpdate?.(task);
     return;
   }
@@ -132,6 +135,11 @@ async function processTask(task: TaskRecord, ctx: PipelineContext, hooks: Pipeli
       task.stage = 'done';
       ctx.store.upsert(task);
       ctx.queue.complete(task.id, 'done', (await stat(dest).catch(() => ({ size: 0 }))).size);
+      // 成品已落位，删掉这个任务的中间分片（分片续传只服务于未完成任务）
+      if (config.output.cleanCacheOnDone) {
+        const cleaned = await cleanTaskCache(root, task.id);
+        if (cleaned.bytes) invalidateUsage(root);
+      }
       hooks.onTaskUpdate?.(task);
       log.info(`✔ ${path.basename(dest)}（${probe.width}x${probe.height}，${probe.duration.toFixed(0)}s）`);
       return;

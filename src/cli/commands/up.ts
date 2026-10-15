@@ -1,21 +1,11 @@
 import { DEFAULT_COOKIE_FILE, loadCookieFile } from '../../auth/cookie.js';
 import { loadConfig } from '../../config.js';
 import { log } from '../../utils/logger.js';
-import { accountInfo, listUploads, parseUpIdentity, searchUp } from '../../api/space.js';
-import { buildTasks } from '../../core/planner.js';
+import { buildUpTasks } from '../../core/upPlan.js';
 import { TaskStore } from '../../core/taskStore.js';
 import { DownloadQueue } from '../../core/queue.js';
 import { runQueue } from '../../core/pipeline.js';
 import { checkEngines } from '../../core/engines/index.js';
-import { sanitizeName } from '../../core/namer.js';
-import type { VideoMeta } from '../../types/index.js';
-
-function parseDuration(text: string): number {
-  const parts = text.split(':').map((p) => Number(p) || 0);
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return parts[0] ?? 0;
-}
 
 export interface UpOptions {
   since?: string;
@@ -35,51 +25,19 @@ export async function upCommand(target: string, options: UpOptions): Promise<voi
     return;
   }
 
-  let mid = parseUpIdentity(target);
-  if (mid === null) {
-    mid = await searchUp(store.cookies, target);
-    if (mid === null) {
-      log.error(`无法解析 UP 主：${target}（可用 mid、space.bilibili.com 链接或昵称）`);
-      process.exitCode = 1;
-      return;
-    }
+  let plan;
+  try {
+    plan = await buildUpTasks(store.cookies, target, {
+      limit: options.limit,
+      keyword: options.keyword,
+      since: options.since,
+    });
+  } catch (err) {
+    log.error((err as Error).message);
+    process.exitCode = 1;
+    return;
   }
-
-  const info = await accountInfo(store.cookies, mid);
-  const uploads = await listUploads(store.cookies, mid);
-  const sinceTs = options.since ? Date.parse(options.since) : 0;
-
-  const kw = options.keyword;
-  let list = uploads.filter((v) => v.bvid && (!sinceTs || v.created * 1000 >= sinceTs));
-  if (kw) list = list.filter((v) => v.title.includes(kw));
-
-  const dir = config.output.upDirTemplate
-    .replace('{up}', sanitizeName(info.name))
-    .replace('{mid}', String(mid));
-  log.info(`UP 主 ${info.name}（mid=${mid}）：${list.length} 个投稿 → outputs/${dir}`);
-
-  const videos: VideoMeta[] = list.map((v) => ({
-    bvid: v.bvid,
-    aid: v.aid,
-    title: v.title,
-    desc: v.description,
-    cover: v.pic,
-    up: { mid, name: info.name },
-    pubDate: v.created * 1000,
-    duration: parseDuration(v.length),
-    url: `https://www.bilibili.com/video/${v.bvid}`,
-    collectedPage: 1,
-    folders: [],
-    primaryFolder: { fid: 0, title: `UP:${info.name}`, dir },
-    local: { status: 'pending' },
-  }));
-
-  const tasks = await buildTasks(store.cookies, videos, {
-    source: 'up',
-    limit: options.limit,
-    orderBy: 'pubDate',
-    outDirOf: () => dir,
-  });
+  const tasks = plan.tasks;
 
   if (options.dryRun) {
     for (const t of tasks.slice(0, 20)) log.print(`[DRY] ${t.outDir}/${t.baseName}.${t.container}`);

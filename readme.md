@@ -13,6 +13,7 @@
 - **UP 主模式**：给 mid / 主页 URL / 昵称，按发布时间从新到旧下载全部投稿
 - **最高可用画质**：自动选账号可播的最高档（大会员即 8K / 4K / HDR / 杜比视界 / 60fps），无权益自动降级
 - **多线程流水线**：下载队列与转码队列并行度各 3，边下边转
+- **分片缓存自动回收**：任务封装成功即删它的中间分片，另有 `bili cache` 手动清残留
 - **双引擎**：主引擎自研（分片级续传），副引擎 yt-dlp，任务失败自动切换
 - **分段流归一化**：DASH(m4s) / 多段 durl 统一合成单个 mp4（默认 `-c copy` 不重编码）
 - **弹幕**：`.ass` + `.srt` 各一份，与视频同名同目录
@@ -20,7 +21,7 @@
 - **多 P**：全部下载，用 `[P1] [P2]…` 后缀区分
 - **超时与停滞**：连接 / 首字节 / 读空闲 / 速率停滞 / 任务总时长 / 转码停滞多级超时，停滞三级响应（重连 → 重建会话 → 切引擎）
 - **队列可中断可恢复**：任务粒度断点续传；首次重试排队首，第 2 次起排队尾并退避
-- **控制端网页**：dashboard（任务数 / 已下载视频与占用 / 总速度 / 磁盘 / 登录态·会员状态 + 一键暂停继续下载与转码）+ 实时任务表 + 任务级控制 + 配置热更新
+- **控制端网页**：dashboard（任务数 / 已下载视频与占用 / 总速度 / 磁盘 / 登录态·会员状态 + 一键暂停继续下载与转码 + 清理缓存）+「添加下载」（按收藏夹 / 按 UP 主入队，可刷新收藏夹）+ 实时任务表与任务级控制 + 配置热更新
 
 ## 实现进度
 
@@ -99,12 +100,17 @@ npm run bili -- web --no-download                 # 只看板，不启动下载
 页面提供：
 
 - **dashboard**：任务总数 / 进行中（下载·转码）/ 已完成 / 已下载视频数与占用空间（含上限进度条）/ 总下载速度 MB/s / 磁盘剩余 / 登录态与会员状态；两个按钮分别**暂停 / 继续全局下载**与**暂停 / 继续全局转码**（转码暂停时已下载分片保留，恢复后继续封装）
+- **添加下载**：两个 tab ——「收藏夹」（选收藏夹 + 数量上限 + 排序 → 加入队列，旁边可一键刷新收藏夹）与「UP 主」（填 mid / 主页链接 / 昵称 + 数量上限 + 关键词 → 抓取投稿并加入队列）。队列取空后控制端仍会继续轮询，随时加任务都会接着跑
 - **任务表**（画质徽标 / 阶段 / 分片进度 / 引擎 / 停滞提示）+ 任务级控制（暂停 / 继续 / 取消 / 重试 / 插队）、配置热更新、日志 tail
 
 ### 查询与补偿
 
 ```bash
-npm run bili -- status                            # 队列与任务状态概览
+npm run bili -- cache --dry-run                   # 查看分片缓存占多少、将释放多少
+npm run bili -- cache                             # 只清已完成/已跳过任务的残留分片（保留续传分片）
+npm run bili -- cache --all                       # 清空全部分片（未完成任务将重新完整下载）
+
+npm run bili -- status                            # 队列与任务状态概览（含 outputs 占用/上限）
 npm run bili -- repair --failed                   # 重跑失败任务
 npm run bili -- repair --need-mux                 # 只重跑待封装任务
 npm run bili -- repair --engine ytdlp             # 强制用副引擎
@@ -146,6 +152,7 @@ outputs/
 | `limits` | `maxOutputGB` / `warnRatio` / `pauseOnExceed` | `500` / `0.9` / `true` | outputs 总占用上限（GB）、告警比例、超限自动暂停 |
 | `output` | `root` / `filenameTemplate` / `partSuffix` | `outputs` / `{title} [P{p}] [{bvid}]` / `auto` | 目录与命名 |
 | `output` | `sidecarMeta` / `nfo` | `true` / `false` | 同名 `.meta.json`、可选 `.nfo` |
+| `output` | `cleanCacheOnDone` | `true` | 封装成功后立即删除该任务的中间分片 |
 | `download` | `maxParallelTasks` / `maxStreamsPerTask` | `3` / `3` | 下载任务并发、单流 Range 分片数 |
 | `download` | `quality` / `preferHdr` / `preferHighFps` / `codec` | `best` / `true` / `true` / `auto` | 选流策略 |
 | `download` | `pages` / `folderPick` | `all` / `non-default-first` | 分 P 范围、多收藏夹归属 |
@@ -171,7 +178,7 @@ outputs/
 
 ## 已知限制
 
-- **中间分片不自动清理**：任务封装成功后 `outputs/.cache/media/<taskId>/` 里的分片仍会保留（dashboard 会单独显示「缓存」占用）。当前需手动删除已完成任务的目录；补上自动清理在后续打磨阶段。
+- **历史残留分片需手动清一次**：自动回收只对新完成的任务生效；此前攒下的残留用 `bili cache`（只清已完成任务的）或 `bili cache --all` 处理，dashboard 会单独显示「缓存」占用。
 - **占用上限只做「不再新增」**：达到 `limits.maxOutputGB` 后暂停下载队列，但不会自动删除已有内容（在途任务会跑完）。
 - **登录态不自动续期**：`refresh_token` 续期尚未实现，cookie 过期后需重新 `bili login`。
 - **控制端默认端口 8765**：若被其他程序（如编辑器）占用，用 `bili web --port <其他端口>`。

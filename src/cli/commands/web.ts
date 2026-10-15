@@ -95,9 +95,16 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
   process.on('SIGTERM', onSignal);
 
   if (!options.noDownload) {
-    await runQueue({ cookies: store.cookies, store: taskStore, queue }, {
-      onTaskUpdate: (task) => bus.emit({ t: 'task.update', task: toSummary(task) }),
-    });
-    log.print('队列已跑完，控制端保持运行（Ctrl-C 退出）');
+    log.print(`outputs 目录：${config.output.root}`);
+    // 管理端随时可能新增任务（收藏夹 / UP 主），所以取空后再轮询，而不是直接结束
+    for (;;) {
+      await runQueue({ cookies: store.cookies, store: taskStore, queue }, {
+        onTaskUpdate: (task) => bus.emit({ t: 'task.update', task: toSummary(task) }),
+        onOverLimit: (usage) => bus.emit({ t: 'disk.warn', freeGB: usage.freeBytes / 1024 ** 3 }),
+      });
+      if (stopping) break;
+      await new Promise((r) => setTimeout(r, 3000));
+      if (stopping) break;
+    }
   }
 }

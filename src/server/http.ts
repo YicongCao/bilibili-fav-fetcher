@@ -10,7 +10,9 @@ import { log } from '../utils/logger.js';
 import { formatBytes } from '../utils/fsx.js';
 import { nav } from '../api/nav.js';
 import { expiresInDays } from '../auth/cookie.js';
-import { outputUsage } from '../core/disk.js';
+import { outputUsage, invalidateUsage } from '../core/disk.js';
+import { cleanAllCache, cleanDoneCache } from '../core/cache.js';
+import { enqueueFavorites, enqueueUp, listFolders, refreshFavorites, type EnqueueCtx } from '../core/enqueue.js';
 import { isMuxPaused, setMuxPaused } from '../core/muxGate.js';
 import type { TaskStore } from '../core/taskStore.js';
 import type { DownloadQueue } from '../core/queue.js';
@@ -86,6 +88,14 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
       res.write(payload);
     }
   });
+
+  /** 入队类接口的公共上下文（需要登录态） */
+  const enqueueCtx = (): EnqueueCtx => {
+    if (!ctx.cookies || Object.keys(ctx.cookies).length === 0) {
+      throw new Error('控制端未拿到登录态，请先 bili login 后重启 bili web');
+    }
+    return { cookies: ctx.cookies, store: ctx.store, queue: ctx.queue, root: ctx.root };
+  };
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
@@ -174,6 +184,70 @@ export async function startServer(ctx: ServerContext): Promise<{ url: string; cl
         },
         auth,
       });
+      return;
+    }
+
+    if (route === '/api/folders') {
+      json(res, { folders: await listFolders(enqueueCtx()) });
+      return;
+    }
+
+    if (route === '/api/scan' && req.method === 'POST') {
+      try {
+        const result = await refreshFavorites(enqueueCtx());
+        bus.emit({ t: 'queue.stats', stats: {} as never });
+        json(res, { ok: true, ...result });
+      } catch (err) {
+        json(res, { ok: false, error: (err as Error).message }, 400);
+      }
+      return;
+    }
+
+    if (route === '/api/enqueue/favorites' && req.method === 'POST') {
+      const payload = await body(req);
+      try {
+        const result = await enqueueFavorites(enqueueCtx(), {
+          folder: payload.folder ? String(payload.folder) : undefined,
+          limit: payload.limit ? Number(payload.limit) : undefined,
+          order: payload.order as 'favTime' | 'pubDate' | undefined,
+        });
+        bus.emit({ t: 'queue.stats', stats: {} as never });
+        json(res, { ok: true, ...result });
+      } catch (err) {
+        json(res, { ok: false, error: (err as Error).message }, 400);
+      }
+      return;
+    }
+
+    if (route === '/api/enqueue/up' && req.method === 'POST') {
+      const payload = await body(req);
+      const target = String(payload.target ?? '').trim();
+      if (!target) {
+        json(res, { ok: false, error: '请填写 UP 主 mid / 主页链接 / 昵称' }, 400);
+        return;
+      }
+      try {
+        const result = await enqueueUp(enqueueCtx(), {
+          target,
+          limit: payload.limit ? Number(payload.limit) : undefined,
+          keyword: payload.keyword ? String(payload.keyword) : undefined,
+          since: payload.since ? String(payload.since) : undefined,
+        });
+        bus.emit({ t: 'queue.stats', stats: {} as never });
+        json(res, { ok: true, ...result });
+      } catch (err) {
+        json(res, { ok: false, error: (err as Error).message }, 400);
+      }
+      return;
+    }
+
+    if (route === '/api/cache/clean' && req.method === 'POST') {
+      const payload = await body(req);
+      const result =
+        payload.scope === 'all' ? await cleanAllCache(ctx.root) : await cleanDoneCache(ctx.root, ctx.store);
+      invalidateUsage(ctx.root);
+      log.warn(`已清理分片缓存，释放 ${formatBytes(result.bytes)}（${result.removed} 个目录）`);
+      json(res, { ok: true, ...result });
       return;
     }
 

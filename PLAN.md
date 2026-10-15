@@ -30,9 +30,9 @@
 5. **多线程 + 单一队列**：下载与转码各一条队列，**并行度上限均为 3**，两阶段流水线**重叠执行**（边下边转）；**所有下载任务必须进入下载队列**，队列可中断、可恢复、自身带 metadata。
 6. **双下载引擎**：主引擎 = 自研 Node 引擎（选流可控、分片级续传、无外部依赖）；副引擎 = yt-dlp（应对接口变更与疑难格式）；**任务级失败自动切换**，两引擎产出同一契约（§3.13）。
 7. **分段流归一化**：DASH(m4s) / HLS(m3u8) / 多段 `durl` 统一拼成单文件，**封装优先 mp4（可选 mov）**，默认只重封装不重编码。
-8. **弹幕**：下载并转换为 `.ass`（默认）/ `.srt`，与视频**同目录同名**。
+8. **弹幕**：`.ass` 与 `.srt` **各存一份**（ass 保留滚动/置顶/颜色/字号等样式，srt 兼容简单播放器），与视频**同目录同名**。
 9. **封面与 metadata**：封面大图 + **同名 `.meta.json`**（可选 `.nfo`）+ 容器内 tags，全部与视频**同目录同名**。
-10. **多 P 全量下载**：多分 P 稿件默认 `pages: all` 全部下载，文件名用 `[P1] [P2]…` 区分，每个 P 各自带弹幕/封面/metadata。
+10. **多 P 全量下载**：多分 P 稿件默认 `pages: all` 全部下载，**用 `[P1] [P2]…` 文件名后缀区分（不建子目录）**，每个 P 各自带弹幕/封面/metadata。
 11. **UP 主模式**：给定 UP 主 → 拉取全部投稿元数据 → 从新到旧下载。
 12. **媒体库索引页**：生成 `outputs/index.html`，支持筛选/搜索/排序/播放，多 P 按稿件聚合。
 13. **控制端网页**：实时任务看板（速度/进度/队列/引擎/日志）+ 任务级控制（暂停/继续/取消/插队/重试/换引擎）+ 配置热更新 + **按任务粒度断点续传**，进程重启自动恢复。
@@ -139,10 +139,10 @@ outputs/
 │  ├─ metadata.json            # 该收藏夹视频列表（可关）
 │  ├─ 【官方】XX 教程 [P1] [BV1xx411c7mD].mp4      # ← 多 P 全部下载，P 序号后缀区分
 │  ├─ 【官方】XX 教程 [P1] [BV1xx411c7mD].ass
-│  ├─ 【官方】XX 教程 [P1] [BV1xx411c7mD].srt     (可选)
+│  ├─ 【官方】XX 教程 [P1] [BV1xx411c7mD].srt
 │  ├─ 【官方】XX 教程 [P1] [BV1xx411c7mD].jpg
 │  ├─ 【官方】XX 教程 [P1] [BV1xx411c7mD].meta.json   # ← 同名 metadata 侧车
-│  ├─ 【官方】XX 教程 [P2] [BV1xx411c7mD].mp4 / .ass / .jpg / .meta.json
+│  ├─ 【官方】XX 教程 [P2] [BV1xx411c7mD].mp4 / .ass / .srt / .jpg / .meta.json
 │  └─ ...
 ├─ 音乐现场/
 │  └─ ...
@@ -213,7 +213,11 @@ outputs/
   - 多 P 稿件按 `download.pages` 展开为多个任务，默认 `all`（**全部 P 都下**）；同一稿件的多个 P **按 page 升序连续排期**，避免与别的视频交错
   - 任务之间互不依赖，可任意排序、暂停、重试、插队；且**引擎无关**：同一任务既能交给主引擎也能交给副引擎执行（§3.13）
 - **排序**：`favTime`（默认，按加入收藏时间倒序）/ `pubDate`（按发布时间倒序）；UP 主模式固定 `pubDate`。
-- **归属目录**：主收藏夹 → `outputs/{收藏夹名}/`；同时属于多个收藏夹时按 `linkMode`：`first`（默认，只在主目录存实体，索引页多分类可见）/ `hardlink` / `copy`。
+- **归属目录（已定：优先非默认收藏夹）**：一个视频同属多个收藏夹时，按 `download.folderPick` 选主目录：
+  1. `non-default-first`（**默认**）：先剔除「默认收藏夹」（`title === '默认收藏夹'`，或命中 `output.excludedFolders`），在剩余收藏夹中取 **`fav_time` 最新**的那个；若只存在于默认收藏夹，才回退用它
+  2. `newest`：直接取 `fav_time` 最新的收藏夹（不排除默认收藏夹）
+  3. `first`：B 站返回顺序的第一个（原行为）
+  - 选中目录存实体，其余收藏夹只在 `index.json` / 索引页中多分类可见（不占磁盘）；需要多份实体时可用 `linkMode: hardlink | copy`
 - **状态机**（任务级，落盘到 `outputs/.state/tasks.json`）：
 
 ```
@@ -301,7 +305,7 @@ queued → planning → downloading → muxing → finalizing → done
   - **防重叠**：按模式分轨道（`轨道数 = floor(可用高度 / 行高)`），同一轨道内用「前一条滚出屏幕时间 > 本条进入时间」判定可复用；轨道满则丢弃该条（或按 `danmaku.maxPerScreen` 降采样）
   - 输出 `UTF-8 with BOM`（Windows 播放器友好）
 - **SRT 生成**（可选）：仅文本 + 时间轴，`displayMs` 默认 5s；顶部/底部在文本前加 `[top]`/`[bottom]` 标注；时间格式 `HH:MM:SS,mmm`
-- 落盘：`{同名}.ass` / `{同名}.srt`，与视频同目录 → 播放器（PotPlayer/IINA/VLC/mpv）自动识别
+- 落盘（**已定：两份都要**）：`{同名}.ass` **和** `{同名}.srt` 各一份，与视频同目录 → 播放器（PotPlayer/IINA/VLC/mpv）自动识别；`danmaku.formats: ["ass","srt"]`，可按需改为只出一种
 - 分 P 视频：按 cid 分别生成，文件名 `{标题} [P{p}] [{bvid}].ass`
 
 ### 3.9 封面 · metadata 落盘（均与视频同名同目录）
@@ -752,8 +756,10 @@ interface QueueState {
   "output": {
     "root": "outputs",
     "filenameTemplate": "{title} [P{p}] [{bvid}]",
-    "partSuffix": "auto",            // auto(多P才加) | always | never
-    "groupMultiP": false,            // true 时多 P 归入 {title}/ 子目录
+    "partSuffix": "auto",            // auto(多P才加) | always | never（已定：后缀方式）
+    "groupMultiP": false,            // 已定 false：多 P 平铺，不建子目录
+    "preferNonDefaultFolder": true,  // 已定 true：优先保存到非默认收藏夹
+    "excludedFolders": [],           // 额外排除的收藏夹名（如 "默认收藏夹"）
     "perFolderMetadata": true,       // 每个收藏夹一份 metadata.json
     "sidecarMeta": true,             // ★ 每个视频一份同名 .meta.json
     "nfo": false,                    // 可选：同名 .nfo（Kodi/Jellyfin/Plex）
@@ -765,7 +771,8 @@ interface QueueState {
     "native": { "enabled": true },
     "ytdlp": {
       "enabled": true,
-      "path": null,                  // null = PATH/brew/自动下载
+      "path": null,
+      "autoDownload": true,          // 已定：PATH → brew → 自动下载官方二进制到 bin/
       "autoUpdateCheck": true,       // 每天最多一次
       "concurrentFragments": 3
     },
@@ -817,7 +824,8 @@ interface QueueState {
     "fnval": 4048,                   // DASH+HDR+4K+杜比+8K+AV1 全开
     "pages": "all",                  // all(全部P) | collected(只下被收藏的P) | first
     "skipExisting": true,
-    "linkMode": "first",             // first | hardlink | copy
+    "folderPick": "non-default-first", // non-default-first | newest | first
+    "linkMode": "first",             // first(单份实体) | hardlink | copy
     "minFreeDiskGB": 5,
     "timeoutMs": 30000
   },
@@ -838,7 +846,7 @@ interface QueueState {
   },
   "danmaku": {
     "enabled": true,
-    "formats": ["ass"],              // ["ass"] | ["srt"] | ["ass","srt"]
+    "formats": ["ass", "srt"],       // 已定：ass + srt 各一份
     "scrollDuration": 8,
     "maxPerScreen": 40,
     "fontFamily": "Microsoft YaHei",
@@ -891,6 +899,7 @@ bili repair [--failed|--need-mux]               # 补偿重跑
 - 格式：`type(scope): 简述`；`type ∈ feat|fix|refactor|perf|test|docs|chore`，`scope ∈ auth|api|core|queue|engine|mux|danmaku|library|server|web|cli`
 - 正文记录**本 commit 的 DoD 验证结果**（命令 + 实际输出摘要），便于事后回溯
 - 每个执行小节完成即提交；小节内每完成一个可验证子项也可单独提交
+- **README 随开发同步更新**（不是最后补）：S0 建 README 骨架，之后每个小节把「新增的 CLI 命令 / 配置项 / 目录约定 / 已知限制」写进 README；小节 DoD 包含「README 已同步」
 - **每个 commit 必须满足**：`npm run lint && npm test` 通过、能编译、`git status` 中不含 `outputs/ state/ .local/ bin/` 及任何凭据文件
 - 提交作者：沿用仓库本地 git config（当前为 `pixelcao`）；若后续接入要求企业邮箱的远端，提交时显式传 `GIT_AUTHOR_NAME/EMAIL` 与 `GIT_COMMITTER_NAME/EMAIL`
 
@@ -915,7 +924,8 @@ bili repair [--failed|--need-mux]               # 补偿重跑
 1. `npm init` + TypeScript（`tsconfig`：ESM、`strict`）、`tsx` 运行、`vitest` 测试、`eslint`+`prettier`
 2. 建立 §2.1 目录骨架、`config.example.json`、`.gitignore`（`outputs/`、`state/`、`node_modules/`）
 3. `utils/logger.ts`（pino，同时写 `outputs/.state/logs/`）、`utils/fsx.ts`（原子写、确保目录、安全路径拼接）、`utils/http.ts`（undici，超时/代理/重试骨架）
-4. **DoD**：`npx tsx src/cli/index.ts --help` 可运行；`bili doctor` 能打印 Node/ffmpeg/磁盘信息
+4. **README 骨架**：项目简介、实现进度看板（S0~S11 勾选）、命令一览（已实现的高亮）、配置说明、合规声明
+5. **DoD**：`npx tsx src/cli/index.ts --help` 可运行；`bili doctor` 能打印 Node/ffmpeg/磁盘信息；README 已提交
 
 ### S1 · 登录与 API 客户端（4h）
 1. `auth/wbi.ts`（mixin key 计算 + 每日缓存）、`auth/fingerprint.ts`（buvid3/b_nut）
@@ -992,8 +1002,8 @@ bili repair [--failed|--need-mux]               # 补偿重跑
 5. `bili serve`（Node 静态服务，Range 支持，`--open`）
 6. **DoD**：`bili build-index && bili serve` 后浏览器可浏览全部视频、点击可播、字幕可选；双击 `outputs/index.html` 走 `file://` 也能出列表
 
-### S11 · 打磨与文档（3h）
-1. `README.md`：安装、`brew install ffmpeg`、快速开始、常见问题、配置说明
+### S11 · 打磨与文档定稿（3h）
+1. `README.md` **定稿**（前面各小节已持续更新）：补齐安装（`brew install ffmpeg`）、快速开始、常见问题与故障排查、完整配置说明
 2. 边界处理：磁盘不足预警、超长标题、空收藏夹、cookie 过期交互提示
 3. 性能：1000+ 条目的索引分页/虚拟滚动；扫描增量更新（只拉新增）
 4. 最终端到端验收（§7）
@@ -1008,7 +1018,7 @@ bili repair [--failed|--need-mux]               # 补偿重跑
 2. `bili scan` 在 `outputs/` 生成与收藏夹一一对应的目录，`outputs/index.json` 覆盖全部收藏视频，字段完整率 100%（除可选字段）。
 3. `bili download` 按收藏时间倒序；抽查前 5 个视频的 `favTime` 单调不增。
 4. **画质**：大会员账号下 4K 源能被识别并落到 4K/HDR/60fps 档（`ffprobe` 验证分辨率、帧率、色彩空间）；无权益时自动降级且任务标记 `degraded`。
-5. 每个完成视频同目录存在**同名四件套** `.mp4` / `.ass` / `.jpg` / `.meta.json`；视频可播、弹幕时间轴对齐、封面可显示；`ffprobe` 能读到容器 tags；`build-index` 优先读 `.meta.json` 还原条目。
+5. 每个完成视频同目录存在**同名五件套** `.mp4` / `.ass` / `.srt` / `.jpg` / `.meta.json`；视频可播、弹幕时间轴对齐（ass 与 srt 都对得上）、封面可显示；`ffprobe` 能读到容器 tags；`build-index` 优先读 `.meta.json` 还原条目。
 5b. **多 P 稿件**：一个 5P 的收藏视频产出 5 个文件，文件名依次带 `[P1]…[P5]`，每个都有各自的弹幕/封面/metadata；索引页按 `groupId` 聚合并可下拉切 P。
 6. **分段源**：构造 DASH / 多段 durl / 加密 m3u8 三个样本，均能产出**单个** mp4（或配置的 mov）且时长、音轨正确，无重编码（除非显式开启）。
 7. **并发**：稳态为「下载 ≤3 任务 + 转码 ≤3 作业」并行；单任务内分片 ≤3；全程无 -412。
@@ -1050,13 +1060,17 @@ bili repair [--failed|--need-mux]               # 补偿重跑
 
 ---
 
-## 9. 待定项（可在 S0 前确认，不阻塞开工）
+## 9. 已确认的产品决策（v1.0 冻结，除非后续明确变更）
 
-1. 默认清晰度：`best`（账号能给的最高，大会员即 4K/HDR/60fps）。是否需要一个「体积上限」策略（单文件 > N GB 自动降一档）？
-2. 默认容器：`mp4`（兼容性最好）。HDR/杜比场景是否要默认切 `mov`？
-3. 同一视频属于多个收藏夹：默认只落在主收藏夹目录（索引里多分类可见），是否需要硬链接多份？
-4. 弹幕默认只出 `.ass` 还是 `.ass` + `.srt` 各一份？
-5. 多分 P 视频：**默认全部下载（`pages: all`）并用 `[P{n}]` 后缀区分**（已定）；是否要把多 P 收进 `{标题}/` 子目录（默认关闭，平铺）？
-6. 副引擎 yt-dlp 是否默认开启自动下载二进制（约 30MB）？还是只使用系统已装版本（默认：PATH → brew → 自动下载）？
+| # | 决策项 | 结论 | 落地配置 / 位置 |
+| --- | --- | --- | --- |
+| 1 | 清晰度 | **`best`**：取账号可播的最高档（大会员即 4K/HDR/60fps）；**不做体积上限策略** | `download.quality: "best"`、`maxResolution: "8K"`（§3.5） |
+| 2 | 封装容器 | **默认 `mp4`**（兼容性最好）；`mov` 仅作为可选项 | `mux.container: "mp4"`（§3.7） |
+| 3 | 多收藏夹归属 | **优先保存到「非默认收藏夹」**：剔除默认收藏夹后取 `fav_time` 最新的那个；只在默认收藏夹里时才回退 | `download.folderPick: "non-default-first"`（§3.4） |
+| 4 | 弹幕格式 | **`.ass` 与 `.srt` 各一份**（ass 保留样式，srt 兼容简单播放器） | `danmaku.formats: ["ass","srt"]`（§3.8） |
+| 5 | 多分 P | **全部下载 + `[P1] [P2]…` 文件名后缀区分，不建子目录** | `download.pages: "all"`、`output.partSuffix: "auto"`、`groupMultiP: false`（§4.3） |
+| 6 | 副引擎二进制 | **允许自动下载**：PATH → brew → 自动下载到 `bin/` | `engines.ytdlp.autoDownload: true`（§3.13） |
+| 7 | 登录态 | 用户提供测试账号，**仅扫码一次**；凭据放 `.local/`（gitignore），靠 `refresh_token` 自动续期 | §3.16 / §6.0 |
+| 8 | 提交与同步 | 每执行小节一个 commit 并**立即 push**；README 随小节同步更新 | §6.0 |
 
-> 以上均已给出默认值（best / mp4 / first / 仅 ass / all P + `[P{n}]` / 双引擎 auto；下载与转码并行度均为 3），可直接开工，后续改配置即可。
+> 其余默认值：下载/转码并行度 3、队列可中断可恢复、首次重试排队首、第 2 次起排队尾 + 退避、停滞 60s 触发超时、任务粒度断点续传。

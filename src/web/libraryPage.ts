@@ -123,7 +123,10 @@ export function renderLibraryPage(): string {
   }
   @keyframes sheetIn { from { transform:translateY(24px) scale(.98); opacity:0; } to { transform:none; opacity:1; } }
   .player { padding:14px 14px 0; }
+  .stage { position:relative; border-radius:var(--r-md); overflow:hidden; background:#000; }
   video { width:100%; background:#000; border-radius:var(--r-md); max-height:60vh; display:block; }
+  /* 弹幕层：覆盖在视频上，不拦截鼠标 */
+  #dm { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; display:block; }
   .pmeta { padding:12px 18px 16px; }
   .pmeta .t { font-size:15px; font-weight:600; line-height:1.35; }
   .pmeta .s { color:var(--label-2); font-size:12px; margin-top:5px; }
@@ -195,13 +198,22 @@ export function renderLibraryPage(): string {
 
 <dialog id="dlg"><div class="sheet">
   <div class="grabber"></div>
-  <div class="player"><video id="video" controls preload="metadata"></video></div>
+  <div class="player">
+    <div class="stage">
+      <video id="video" controls preload="metadata"></video>
+      <canvas id="dm"></canvas>
+    </div>
+  </div>
   <div class="pmeta">
     <div class="t" id="p-title"></div>
     <div class="s" id="p-sub"></div>
     <div class="parts" id="p-parts"></div>
     <div class="sheet-acts">
       <button id="p-open" class="filled">打开 B 站原页面</button>
+      <button id="p-dm">弹幕：开</button>
+      <select id="p-dm-size" style="width:96px" title="弹幕字号">
+        <option value="0.8">弹幕 小</option><option value="1" selected>弹幕 中</option><option value="1.3">弹幕 大</option>
+      </select>
       <button id="p-copy">复制路径</button>
       <button id="p-pip">画中画</button>
       <select id="p-rate" style="width:96px">
@@ -288,6 +300,144 @@ function renderTree() {
       page = 1; renderTree(); render();
     };
   });
+}
+
+/* ---------- 弹幕：自研 ASS 解析 + canvas 渲染（浏览器原生 track 不认 .ass） ---------- */
+const canvas = document.getElementById('dm');
+const ctx = canvas.getContext('2d');
+let dmOn = localStorage.getItem('bili-dm-on') !== '0';
+let dmScale = Number(localStorage.getItem('bili-dm-size') || 1);
+let dmData = { events: [], resX: 1920, resY: 1080 };
+let dmActive = [];
+let dmCursor = 0;
+let dmRaf = 0;
+
+const assTime = (s) => {
+  // 注意：本文件是模板字符串，正则里的反斜杠要写成 \\ 才会出现在页面上
+  const m = /(\\d+):(\\d+):(\\d+(?:\\.\\d+)?)/.exec(s || '');
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : 0;
+};
+
+/** 只解析我们自己生成的 ASS（\move 滚动 / \an8 顶部 / \an2 底部 / \pos 定位 / \fs 字号 / \c&HBBGGRR& 颜色） */
+function parseAss(src) {
+  let resX = 1920;
+  let resY = 1080;
+  const events = [];
+  let inEvents = false;
+  for (const raw of src.split(/\\r?\\n/)) {
+    let m;
+    if ((m = /^\\s*PlayResX\\s*:\\s*(\\d+)/i.exec(raw))) { resX = Number(m[1]); continue; }
+    if ((m = /^\\s*PlayResY\\s*:\\s*(\\d+)/i.exec(raw))) { resY = Number(m[1]); continue; }
+    if (/^\\[Events\\]/i.test(raw)) { inEvents = true; continue; }
+    if (/^\\[/.test(raw)) { inEvents = false; continue; }
+    if (!inEvents || !/^Dialogue:/i.test(raw)) continue;
+
+    const parts = raw.slice(raw.indexOf(':') + 1).trim().split(',');
+    if (parts.length < 10) continue;
+    const start = assTime(parts[1]);
+    const end = assTime(parts[2]);
+    const withTags = parts.slice(9).join(',');
+    const tagMatch = /^\\{([^}]*)\\}/.exec(withTags);
+    const tags = tagMatch ? tagMatch[1] : '';
+    const text = (tagMatch ? withTags.slice(tagMatch[0].length) : withTags)
+      .replace(/\\\\N/gi, ' ').replace(/\\\\n/gi, ' ').trim();
+    if (!text) continue;
+
+    const move = /\\\\move\\(\\s*(-?[\\d.]+)\\s*,\\s*(-?[\\d.]+)\\s*,\\s*(-?[\\d.]+)\\s*,\\s*(-?[\\d.]+)/.exec(tags);
+    const pos = /\\\\pos\\(\\s*(-?[\\d.]+)\\s*,\\s*(-?[\\d.]+)/.exec(tags);
+    const fs = /\\\\fs([\\d.]+)/.exec(tags);
+    const col = /\\\\(?:1?c)&H([0-9a-f]{6})&/i.exec(tags);
+    const an = /\\\\an(\\d)/.exec(tags);
+
+    let color = '#ffffff';
+    if (col) {
+      const h = col[1];
+      color = 'rgb(' + parseInt(h.slice(4, 6), 16) + ',' + parseInt(h.slice(2, 4), 16) + ',' + parseInt(h.slice(0, 2), 16) + ')';
+    }
+    const size = fs ? Number(fs[1]) : Math.round(resY * 0.045);
+
+    if (move) {
+      events.push({ start, end, text, mode: 'scroll', x: +move[1], y: +move[2], x2: +move[3], size, color });
+    } else if (pos) {
+      const mode = an ? (an[1] === '2' ? 'bottom' : 'top') : 'top';
+      events.push({ start, end, text, mode, x: +pos[1], y: +pos[2], x2: +pos[1], size, color });
+    } else {
+      events.push({ start, end, text, mode: 'scroll', x: resX, y: size, x2: -size, size, color });
+    }
+  }
+  events.sort((a, b) => a.start - b.start);
+  return { events, resX, resY };
+}
+
+function resizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(video.clientWidth * dpr);
+  const h = Math.round(video.clientHeight * dpr);
+  if (!w || !h) return;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+}
+
+async function loadDanmaku(item) {
+  dmActive = []; dmCursor = 0;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const ass = (item.subtitles || []).find((s) => s.format === 'ass');
+  if (!ass) { dmData = { events: [], resX: 1920, resY: 1080 }; return; }
+  try {
+    const text = await (await fetch(encodeURI(ass.file), { cache: 'force-cache' })).text();
+    dmData = parseAss(text);
+  } catch {
+    dmData = { events: [], resX: 1920, resY: 1080 };   // file:// 下取不到，静默降级
+  }
+  syncDanmakuButton();
+}
+
+/** 拖动进度条后游标要回退，否则往回拖会丢弹幕 */
+function rewindDanmaku() {
+  dmCursor = 0;
+  dmActive = [];
+}
+
+function drawDanmaku() {
+  dmRaf = requestAnimationFrame(drawDanmaku);
+  if (!dmOn || !dmData.events.length) return;
+  resizeCanvas();
+  const t = video.currentTime;
+  const list = dmData.events;
+  // 滚动游标：只把新进入的弹幕加入活动集，再剔除已结束的
+  while (dmCursor < list.length && list[dmCursor].start <= t) dmActive.push(list[dmCursor++]);
+  if (dmActive.length > 400) dmActive = dmActive.filter((e) => e.end >= t);
+  else dmActive = dmActive.filter((e) => e.end >= t);
+
+  const scale = canvas.width / dmData.resX;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  for (const e of dmActive) {
+    const p = e.end > e.start ? Math.min(1, Math.max(0, (t - e.start) / (e.end - e.start))) : 1;
+    const y = e.y * scale;
+    const fontSize = Math.max(10, e.size * scale * dmScale);
+    ctx.font = '600 ' + fontSize.toFixed(1) + 'px -apple-system,"PingFang SC",sans-serif';
+    ctx.strokeStyle = 'rgba(0,0,0,.75)';
+    ctx.lineWidth = Math.max(1.5, fontSize / 8);
+    let x;
+    if (e.mode === 'scroll') {
+      x = (e.x + (e.x2 - e.x) * p) * scale;
+      ctx.textAlign = 'left';
+    } else {
+      x = e.x * scale;
+      ctx.textAlign = 'center';
+    }
+    ctx.strokeText(e.text, x, y);
+    ctx.fillStyle = e.color;
+    ctx.fillText(e.text, x, y);
+  }
+}
+
+function syncDanmakuButton() {
+  const btn = document.getElementById('p-dm');
+  btn.textContent = '弹幕：' + (!dmData.events.length ? '无' : dmOn ? '开' : '关');
+  btn.className = dmOn && dmData.events.length ? 'filled' : '';
+  btn.disabled = !dmData.events.length;
 }
 
 async function refreshData() {
@@ -422,14 +572,17 @@ function play(item, group) {
   document.getElementById('p-sub').innerHTML = \`\${esc(item.up.name)} · \${esc(item.folder||'')} · \${fmtDur(item.duration)} · \${fmtSize(item.size)}\`;
   video.poster = item.poster ? encodeURI(item.poster) : '';
   video.src = encodeURI(item.video);
+  // 原生 track 只认 WebVTT，ASS 交给上面的 canvas 弹幕层渲染
   video.querySelectorAll('track').forEach(t => t.remove());
   for (const sub of item.subtitles || []) {
+    if (sub.format === 'ass') continue;
     const tr = document.createElement('track');
     tr.kind = 'subtitles'; tr.label = sub.format.toUpperCase();
     tr.src = encodeURI(sub.file);
-    if (sub.format === 'ass') tr.default = true;
+    tr.default = true;
     video.appendChild(tr);
   }
+  void loadDanmaku(item);
   document.getElementById('p-parts').innerHTML = group.map(g => \`<button data-page="\${g.page}" class="\${g.page===item.page?'on':''}">P\${g.page}\${g.partTitle?' '+esc(g.partTitle):''}</button>\`).join('');
   document.getElementById('p-parts').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -441,6 +594,22 @@ function play(item, group) {
 }
 
 document.getElementById('p-open').onclick = () => { if (current) window.open('https://www.bilibili.com/video/' + current.bvid, '_blank'); };
+document.getElementById('p-dm').onclick = () => {
+  dmOn = !dmOn;
+  localStorage.setItem('bili-dm-on', dmOn ? '1' : '0');
+  syncDanmakuButton();
+  if (!dmOn) ctx.clearRect(0, 0, canvas.width, canvas.height);
+};
+document.getElementById('p-dm-size').onchange = (e) => {
+  dmScale = Number(e.target.value);
+  localStorage.setItem('bili-dm-size', String(dmScale));
+};
+window.addEventListener('resize', resizeCanvas);
+video.addEventListener('loadedmetadata', resizeCanvas);
+video.addEventListener('seeking', rewindDanmaku);
+if (!dmRaf) dmRaf = requestAnimationFrame(drawDanmaku);
+document.getElementById('p-dm-size').value = String(dmScale);
+syncDanmakuButton();
 document.getElementById('p-close').onclick = () => { dlg.close(); video.pause(); };
 dlg.addEventListener('close', () => video.pause());
 document.getElementById('p-rate').onchange = (e) => { video.playbackRate = Number(e.target.value); };

@@ -51,16 +51,7 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
     queue.resume();
   }
 
-  if (!options.noDownload) {
-    const index = await readJson<IndexFile>(`${config.output.root}/index.json`);
-    if (index) {
-      const tasks = await buildTasks(store.cookies, index.videos, { source: 'favorite', limit: options.limit });
-      const added = applyPlannedTasks(taskStore, queue, tasks);
-      if (added < tasks.length) log.info(`跳过 ${tasks.length - added} 个已完成/已跳过的任务`);
-    }
-    await checkEngines(store.cookies);
-  }
-
+  // 先起服务：规划要按稿件逐个请求接口（几百个稿件可能几分钟），不能让它堵住端口
   const { url, close } = await startServer({
     store: taskStore,
     queue,
@@ -68,6 +59,17 @@ export async function webCommand(options: WebOptions = {}): Promise<void> {
     cookies: store.cookies,
     cookieExpiresAt: store.expiresAt ?? null,
   });
+
+  if (!options.noDownload) {
+    const index = await readJson<IndexFile>(`${config.output.root}/index.json`);
+    if (index) {
+      const tasks = await buildTasks(store.cookies, index.videos, { source: 'favorite', limit: options.limit });
+      const added = applyPlannedTasks(taskStore, queue, tasks);
+      if (added < tasks.length) log.info(`跳过 ${tasks.length - added} 个已完成/已跳过的任务`);
+      log.print(`规划完成：新增 ${added} 个任务`);
+    }
+    await checkEngines(store.cookies);
+  }
 
   if (config.control.openBrowser && !options.noOpen) {
     execFile('open', [url], () => undefined);

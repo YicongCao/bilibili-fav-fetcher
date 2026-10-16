@@ -51,6 +51,7 @@ export function renderLibraryPage(): string {
   button.filled { background:var(--blue); color:#fff; }
   button.filled:hover { background:#3d9bff; }
   button.tiny { padding:4px 10px; font-size:12px; }
+  input[type=range] { padding:0; border:0; background:transparent; width:110px; accent-color:var(--blue); cursor:pointer; }
   /* ---------- 布局：侧栏筛选树 + 内容（两栏各自独立滚动） ---------- */
   body { display:flex; flex-direction:column; }
   .wrap { flex:1 1 auto; min-height:0; display:grid; grid-template-columns:216px minmax(0,1fr); gap:18px;
@@ -214,6 +215,10 @@ export function renderLibraryPage(): string {
       <select id="p-dm-size" style="width:96px" title="弹幕字号">
         <option value="0.8">弹幕 小</option><option value="1" selected>弹幕 中</option><option value="1.3">弹幕 大</option>
       </select>
+      <select id="p-dm-area" style="width:104px" title="弹幕显示区域">
+        <option value="1" selected>区域 全部</option><option value="0.5">区域 半屏</option><option value="0.25">区域 1/4</option>
+      </select>
+      <input id="p-dm-opacity" type="range" min="20" max="100" step="5" title="弹幕不透明度" />
       <button id="p-copy">复制路径</button>
       <button id="p-pip">画中画</button>
       <select id="p-rate" style="width:96px">
@@ -307,6 +312,8 @@ const canvas = document.getElementById('dm');
 const ctx = canvas.getContext('2d');
 let dmOn = localStorage.getItem('bili-dm-on') !== '0';
 let dmScale = Number(localStorage.getItem('bili-dm-size') || 1);
+let dmOpacity = Number(localStorage.getItem('bili-dm-opacity') || 1);
+let dmArea = Number(localStorage.getItem('bili-dm-area') || 1);
 let dmData = { events: [], resX: 1920, resY: 1080 };
 let dmActive = [];
 let dmCursor = 0;
@@ -409,12 +416,15 @@ function drawDanmaku() {
   else dmActive = dmActive.filter((e) => e.end >= t);
 
   const scale = canvas.width / dmData.resX;
+  const areaBottom = canvas.height * dmArea;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
+  ctx.globalAlpha = dmOpacity;
   for (const e of dmActive) {
     const p = e.end > e.start ? Math.min(1, Math.max(0, (t - e.start) / (e.end - e.start))) : 1;
     const y = e.y * scale;
+    if (y > areaBottom) continue;   // 超出显示区域的弹幕不画
     const fontSize = Math.max(10, e.size * scale * dmScale);
     ctx.font = '600 ' + fontSize.toFixed(1) + 'px -apple-system,"PingFang SC",sans-serif';
     ctx.strokeStyle = 'rgba(0,0,0,.75)';
@@ -431,6 +441,7 @@ function drawDanmaku() {
     ctx.fillStyle = e.color;
     ctx.fillText(e.text, x, y);
   }
+  ctx.globalAlpha = 1;
 }
 
 function syncDanmakuButton() {
@@ -604,11 +615,21 @@ document.getElementById('p-dm-size').onchange = (e) => {
   dmScale = Number(e.target.value);
   localStorage.setItem('bili-dm-size', String(dmScale));
 };
+document.getElementById('p-dm-area').onchange = (e) => {
+  dmArea = Number(e.target.value);
+  localStorage.setItem('bili-dm-area', String(dmArea));
+};
+document.getElementById('p-dm-opacity').oninput = (e) => {
+  dmOpacity = Number(e.target.value) / 100;
+  localStorage.setItem('bili-dm-opacity', String(dmOpacity));
+};
 window.addEventListener('resize', resizeCanvas);
 video.addEventListener('loadedmetadata', resizeCanvas);
 video.addEventListener('seeking', rewindDanmaku);
 if (!dmRaf) dmRaf = requestAnimationFrame(drawDanmaku);
 document.getElementById('p-dm-size').value = String(dmScale);
+document.getElementById('p-dm-area').value = String(dmArea);
+document.getElementById('p-dm-opacity').value = String(Math.round(dmOpacity * 100));
 syncDanmakuButton();
 document.getElementById('p-close').onclick = () => { dlg.close(); video.pause(); };
 dlg.addEventListener('close', () => video.pause());

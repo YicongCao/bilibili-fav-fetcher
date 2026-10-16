@@ -165,6 +165,7 @@ outputs/
 | `download` | `maxSpeed` / `minFreeDiskGB` | `null` / `5` | 限速、磁盘下限保护 |
 | `mux` | `container` / `maxParallel` / `faststart` | `mp4` / `3` / `true` | 封装容器与转码并发 |
 | `danmaku` | `enabled` / `formats` | `true` / `["ass","srt"]` | 弹幕输出格式 |
+| `danmaku` | `baseFontSize` | `50` | 标准弹幕（B 站 `fontsize=25`）落盘字号，默认 50（2×）；轨道高度与 ASS Style 字号同步缩放 |
 | `timeout` | `idleMs` / `stallMs` / `taskMs` | `20000` / `60000` / `1800000` | 读空闲、速率停滞、任务总时长 |
 | `engines` | `mode` / `ytdlp.autoDownload` | `auto` / `true` | 引擎模式、副引擎二进制自动获取 |
 | `control` | `host` / `port` | `127.0.0.1` / `8765` | 控制端监听 |

@@ -5,6 +5,8 @@ import path from 'node:path';
 import { cleanTaskCache, cleanDoneCache, mediaCacheRoot } from '../src/core/cache.js';
 import { isDeleted, markDeleted, restoreDeleted, deletedKey } from '../src/core/deleted.js';
 import { pickPrimaryFolder } from '../src/core/scanner.js';
+import { buildAss } from '../src/danmaku/ass.js';
+import { layoutDanmaku } from '../src/danmaku/layout.js';
 import { safeJoin } from '../src/server/static.js';
 import type { TaskRecord } from '../src/types/index.js';
 
@@ -86,6 +88,36 @@ describe('多收藏夹归属决策', () => {
   it('只在默认收藏夹里时回退到默认夹', () => {
     const video = { folders: [{ fid: 1, title: '默认收藏夹', favTime: 300 }] };
     expect(pickPrimaryFolder(video, folders, 'non-default-first')).toEqual({ fid: 1, title: '默认收藏夹' });
+  });
+});
+
+describe('弹幕字号与轨道', () => {
+  // 与 finalize 一致：B 站标准 fontsize=25 按 baseFontSize/25 放大（默认 50）
+  const scale = 50 / 25;
+  const raw = [
+    { time: 0, mode: 1, fontSize: 25, color: 0xffffff, text: '滚动弹幕一' },
+    { time: 0, mode: 1, fontSize: 25, color: 0xffffff, text: '滚动弹幕二' },
+    { time: 0, mode: 5, fontSize: 25, color: 0xffffff, text: '顶部弹幕' },
+  ];
+  const placed = layoutDanmaku(
+    raw.map((it) => ({ ...it, fontSize: Math.round((it.fontSize ?? 25) * scale) })),
+    { width: 1920, height: 1080, baseFontSize: 50 },
+  );
+  const ass = buildAss(placed, { width: 1920, height: 1080, baseFont: 50 });
+
+  it('标准弹幕放大到 baseFontSize（50）落盘', () => {
+    expect(ass).toContain('\\fs50');
+    expect(ass).toContain('PlayResX: 1920');
+  });
+
+  it('Style 里的字号跟着 baseFont', () => {
+    expect(ass).toMatch(/Style: Default,[^,]+,50,/);
+  });
+
+  it('轨道高度随字号放大（50 号字 → 轨距 60），避免压字', () => {
+    const ys = [...ass.matchAll(/\\move\(-?\d+,(\d+),/g)].map((m) => Number(m[1]));
+    expect(ys.length).toBe(2);
+    expect(ys[1] - ys[0]).toBe(60);
   });
 });
 

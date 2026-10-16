@@ -18,6 +18,8 @@ export interface LayoutOptions {
   staticDuration?: number;
   /** 允许的最大重叠层数（轨道不够时复用最早结束的轨道） */
   maxOverlap?: number;
+  /** 标准弹幕字号（决定轨道高度），默认 36 */
+  baseFontSize?: number;
 }
 
 export function estimateWidth(text: string, fontSize: number): number {
@@ -36,7 +38,7 @@ export function layoutDanmaku(items: DanmakuItem[], opts: LayoutOptions): Placed
   const staticDuration = opts.staticDuration ?? 5;
   const maxOverlap = Math.max(1, opts.maxOverlap ?? 0);
 
-  const baseFont = 36;
+  const baseFont = opts.baseFontSize ?? 36;
   const trackHeight = baseFont * 1.2;
   const maxTracks = Math.max(4, Math.floor((height * 0.9) / trackHeight));
 

@@ -85,7 +85,13 @@ export interface Config {
     faststart: boolean;
     maxPendingGB: number;
   };
-  danmaku: { enabled: boolean; formats: ('ass' | 'srt')[]; maxOverlap: number };
+  danmaku: {
+    enabled: boolean;
+    formats: ('ass' | 'srt')[];
+    maxOverlap: number;
+    /** 标准弹幕（B 站 fontsize=25）落盘时的字号，默认 50（即 2×）。轨道高度随之缩放 */
+    baseFontSize: number;
+  };
   engines: {
     mode: 'auto' | 'native' | 'ytdlp';
     ytdlp: { enabled: boolean; path: string | null; autoDownload: boolean; autoUpdateCheck: boolean; concurrentFragments: number };
@@ -161,7 +167,7 @@ export const DEFAULT_CONFIG: Config = {
     shutdownGraceMs: 10_000,
   },
   mux: { container: 'mp4', maxParallel: 3, strategy: 'auto', forceTranscode: false, faststart: true, maxPendingGB: 5 },
-  danmaku: { enabled: true, formats: ['ass', 'srt'], maxOverlap: 3 },
+  danmaku: { enabled: true, formats: ['ass', 'srt'], maxOverlap: 3, baseFontSize: 50 },
   engines: {
     mode: 'auto',
     ytdlp: { enabled: true, path: null, autoDownload: true, autoUpdateCheck: true, concurrentFragments: 3 },

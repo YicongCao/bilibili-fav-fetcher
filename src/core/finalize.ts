@@ -27,12 +27,19 @@ export async function writeDanmaku(
 
   const width = task.quality?.width || 1920;
   const height = task.quality?.height || 1080;
-  const placed = layoutDanmaku(items, { width, height, maxOverlap: config.danmaku.maxOverlap });
+  // B 站标准弹幕 fontsize=25，按 baseFontSize 等比放大（默认 50 = 2×）
+  const baseFontSize = config.danmaku.baseFontSize || 50;
+  const scale = baseFontSize / 25;
+  const scaled = items.map((it) => ({ ...it, fontSize: Math.round((it.fontSize ?? 25) * scale) }));
+  const placed = layoutDanmaku(scaled, { width, height, maxOverlap: config.danmaku.maxOverlap, baseFontSize });
 
   const written: string[] = [];
   for (const format of config.danmaku.formats) {
     const file = `${videoFile.slice(0, videoFile.lastIndexOf('.'))}.${format}`;
-    const content = format === 'ass' ? buildAss(placed, { width, height, title: task.title }) : buildSrt(items);
+    const content =
+      format === 'ass'
+        ? buildAss(placed, { width, height, title: task.title, baseFont: baseFontSize })
+        : buildSrt(items);
     await writeFile(file, content, 'utf8');
     written.push(file);
   }

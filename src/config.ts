@@ -89,7 +89,7 @@ export interface Config {
     enabled: boolean;
     formats: ('ass' | 'srt')[];
     maxOverlap: number;
-    /** 标准弹幕（B 站 fontsize=25）落盘时的字号，默认 50（即 2×）。轨道高度随之缩放 */
+    /** 标准弹幕（B 站 fontsize=25）落盘时的字号，默认 30（即 1.2×）。轨道高度随之缩放 */
     baseFontSize: number;
   };
   engines: {
@@ -167,7 +167,7 @@ export const DEFAULT_CONFIG: Config = {
     shutdownGraceMs: 10_000,
   },
   mux: { container: 'mp4', maxParallel: 3, strategy: 'auto', forceTranscode: false, faststart: true, maxPendingGB: 5 },
-  danmaku: { enabled: true, formats: ['ass', 'srt'], maxOverlap: 3, baseFontSize: 50 },
+  danmaku: { enabled: true, formats: ['ass', 'srt'], maxOverlap: 3, baseFontSize: 30 },
   engines: {
     mode: 'auto',
     ytdlp: { enabled: true, path: null, autoDownload: true, autoUpdateCheck: true, concurrentFragments: 3 },

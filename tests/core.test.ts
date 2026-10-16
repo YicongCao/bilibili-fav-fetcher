@@ -5,6 +5,7 @@ import path from 'node:path';
 import { cleanTaskCache, cleanDoneCache, mediaCacheRoot } from '../src/core/cache.js';
 import { isDeleted, markDeleted, restoreDeleted, deletedKey } from '../src/core/deleted.js';
 import { pickPrimaryFolder } from '../src/core/scanner.js';
+import { getConfig } from '../src/config.js';
 import { buildAss } from '../src/danmaku/ass.js';
 import { layoutDanmaku } from '../src/danmaku/layout.js';
 import { safeJoin } from '../src/server/static.js';
@@ -92,7 +93,11 @@ describe('多收藏夹归属决策', () => {
 });
 
 describe('弹幕字号与轨道', () => {
-  // 与 finalize 一致：B 站标准 fontsize=25 按 baseFontSize/25 放大（默认 50）
+  it('默认 baseFontSize 为 30', () => {
+    expect(getConfig().danmaku.baseFontSize).toBe(30);
+  });
+
+  // 与 finalize 一致：B 站标准 fontsize=25 按 baseFontSize/25 放大
   const scale = 50 / 25;
   const raw = [
     { time: 0, mode: 1, fontSize: 25, color: 0xffffff, text: '滚动弹幕一' },

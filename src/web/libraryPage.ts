@@ -20,7 +20,7 @@ export function renderLibraryPage(): string {
   }
   * { box-sizing:border-box; }
   body {
-    margin:0; color:var(--label); background:
+    margin:0; height:100vh; overflow:hidden; color:var(--label); background:
       radial-gradient(1100px 520px at 8% -12%, rgba(10,132,255,.14), transparent 60%),
       radial-gradient(900px 480px at 100% 0%, rgba(191,90,242,.12), transparent 55%),
       var(--bg);
@@ -51,11 +51,17 @@ export function renderLibraryPage(): string {
   button.filled { background:var(--blue); color:#fff; }
   button.filled:hover { background:#3d9bff; }
   button.tiny { padding:4px 10px; font-size:12px; }
-  /* ---------- 布局：侧栏筛选树 + 内容 ---------- */
-  .wrap { display:grid; grid-template-columns:216px minmax(0,1fr); gap:18px; padding:18px 22px 32px; align-items:start; }
-  .side { position:sticky; top:74px; }
+  /* ---------- 布局：侧栏筛选树 + 内容（两栏各自独立滚动） ---------- */
+  body { display:flex; flex-direction:column; }
+  .wrap { flex:1 1 auto; min-height:0; display:grid; grid-template-columns:216px minmax(0,1fr); gap:18px;
+    padding:18px 22px 22px; align-items:start; overflow:hidden; }
+  .side { height:100%; overflow-y:auto; overscroll-behavior:contain; padding-right:2px; }
   .tree { background:var(--surface); border:1px solid var(--sep); border-radius:var(--r-md); padding:8px;
     backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); }
+  /* 细滚动条（贴近 iOS 观感） */
+  .side::-webkit-scrollbar, main::-webkit-scrollbar { width:8px; }
+  .side::-webkit-scrollbar-thumb, main::-webkit-scrollbar-thumb { background:rgba(255,255,255,.16); border-radius:999px; }
+  .side::-webkit-scrollbar-track, main::-webkit-scrollbar-track { background:transparent; }
   .tree h3 { font-size:11px; color:var(--label-3); font-weight:500; padding:6px 8px; }
   .node {
     display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:9px; font-size:13px;
@@ -66,7 +72,10 @@ export function renderLibraryPage(): string {
   .node .n { margin-left:auto; font-size:11px; color:var(--label-3); font-variant-numeric:tabular-nums; }
   .node.on .n { color:rgba(255,255,255,.85); }
   .node.sub { padding-left:20px; font-size:12px; }
-  main { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px; align-content:start; }
+  main { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px; align-content:start;
+    /* 固定高度 + 独立滚动时必须显式声明行高，否则 auto 行会把卡片压扁（封面 aspect-ratio 失效） */
+    grid-auto-rows:max-content;
+    height:100%; overflow-y:auto; overscroll-behavior:contain; padding:2px 4px 8px 2px; }
   main.list { grid-template-columns:1fr; gap:10px; }
   /* ---------- 卡片 ---------- */
   .card {
@@ -150,7 +159,12 @@ export function renderLibraryPage(): string {
   #filehint { display:none; background:rgba(255,159,10,.14); border-bottom:1px solid rgba(255,159,10,.3);
     color:#ffd08a; font-size:12px; padding:8px 22px; }
   #morespace { grid-column:1/-1; text-align:center; color:var(--label-3); font-size:12px; padding:14px 0; }
-  @media (max-width: 900px) { .wrap { grid-template-columns:1fr; } .side { position:static; } }
+  /* 窄屏回到整页滚动（侧栏不再独立滚动） */
+  @media (max-width: 900px) {
+    body { height:auto; overflow:auto; }
+    .wrap { overflow:visible; grid-template-columns:1fr; }
+    .side, main { height:auto; overflow:visible; }
+  }
 </style>
 </head>
 <body>
@@ -377,13 +391,15 @@ function render() {
     ? '<div id="morespace">已显示 ' + shown.length + ' / ' + list.length + '，继续下滑加载更多</div>' : '');
 }
 
-// 滚动分页：接近底部时再加载一页，避免 1000+ 条一次性渲染
-window.addEventListener('scroll', () => {
-  if (window.innerHeight + window.scrollY < document.body.offsetHeight - 400) return;
-  const list = filtered();
-  if (page * PAGE >= list.length) return;
+// 滚动分页：内容列（宽屏）或整页（窄屏）接近底部时再加载一页，避免 1000+ 条一次性渲染
+function maybeLoadMore() {
+  // 宽屏时 main 自己滚；窄屏回退到整页滚
+  const el = grid.scrollHeight - grid.clientHeight > 8 ? grid : document.documentElement;
+  if (el.scrollTop + el.clientHeight < el.scrollHeight - 400) return;
+  if (page * PAGE >= filtered().length) return;
   page += 1; render();
-});
+}
+window.addEventListener('scroll', maybeLoadMore, true);   // capture：同时捕获内容列的滚动
 
 grid.addEventListener('click', (e) => {
   const actBtn = e.target.closest('button[data-act]');
